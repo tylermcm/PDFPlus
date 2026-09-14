@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PDFPlus installer: per-machine install to Program Files, Start menu shortcut, Add/Remove Programs entry,
+  and registration as a PDF app ("Open with" and Settings > Default apps). Windows doesn't let installers
+  make themselves the default PDF app; users choose that in Settings.
+
+  Silent install:  msiexec /i PDFPlus-1.0.0-x64.msi /qn   (add DESKTOP_SHORTCUT=1 for a desktop shortcut)
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="PDFPlus"
+           Manufacturer="PDFPlus"
+           Version="!(bind.FileVersion.PDFPlusExe)"
+           UpgradeCode="7B1D4E2A-5C3F-4A8B-9E61-2D0F8C4B7A93"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <SummaryInformation Description="PDFPlus: fast PDF viewer and editor" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of PDFPlus is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="PDFPlus.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="PDFPlus.ico" />
+    <Property Id="ARPCOMMENTS" Value="Fast PDF viewer and editor. No account, no subscription." />
+    <Property Id="DESKTOP_SHORTCUT" Value="0" Secure="yes" />
+
+    <!-- Wizard: Welcome, install folder, progress, finish (no license page: PDFPlus is free). -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchPDFPlus"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+    <WixVariable Id="WixUIBannerBmp" Value="$(var.ArtDir)banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(var.ArtDir)dialog.bmp" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open PDFPlus now" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[#PDFPlusExe]" />
+    <CustomAction Id="LaunchPDFPlus" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixShellExec" Impersonate="yes" />
+
+    <Feature Id="Main" Title="PDFPlus" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="PdfRegistration" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="PDFPlus" />
+    </StandardDirectory>
+
+    <!-- The self-contained app: one exe plus the native libraries it loads. build-installer.ps1 checks this list is complete. -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Component>
+        <File Id="PDFPlusExe" Source="$(var.PublishDir)PDFPlus.exe">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="PDFPlus" Description="View, edit, fill and sign PDFs"
+                    WorkingDirectory="INSTALLFOLDER" Advertise="no" />
+        </File>
+      </Component>
+      <Component>
+        <File Source="$(var.PublishDir)pdfium.dll" />
+      </Component>
+      <Component>
+        <File Source="$(var.PublishDir)D3DCompiler_47_cor3.dll" />
+      </Component>
+      <Component>
+        <File Source="$(var.PublishDir)PenImc_cor3.dll" />
+      </Component>
+      <Component>
+        <File Source="$(var.PublishDir)PresentationNative_cor3.dll" />
+      </Component>
+      <Component>
+        <File Source="$(var.PublishDir)vcruntime140_cor3.dll" />
+      </Component>
+      <Component>
+        <File Source="$(var.PublishDir)wpfgfx_cor3.dll" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Optional desktop shortcut (DESKTOP_SHORTCUT=1). In a per-machine install this is the all-users desktop. -->
+    <StandardDirectory Id="DesktopFolder" />
+    <Component Id="DesktopShortcut" Directory="INSTALLFOLDER" Condition='DESKTOP_SHORTCUT = "1"'>
+      <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="PDFPlus" Description="View, edit, fill and sign PDFs"
+                Target="[INSTALLFOLDER]PDFPlus.exe" WorkingDirectory="INSTALLFOLDER" />
+      <RegistryValue Root="HKLM" Key="Software\PDFPlus" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- PDF registration: a ProgID, "Open with" entries, and Default apps capabilities. -->
+    <Component Id="PdfRegistration" Directory="INSTALLFOLDER">
+      <RegistryValue Root="HKLM" Key="Software\PDFPlus" Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" />
+
+      <RegistryKey Root="HKLM" Key="Software\Classes\PDFPlus.Document">
+        <RegistryValue Type="string" Value="PDF Document" />
+        <RegistryValue Name="FriendlyTypeName" Type="string" Value="PDF Document" />
+        <RegistryKey Key="DefaultIcon">
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot;,0" />
+        </RegistryKey>
+        <RegistryKey Key="shell\open\command">
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot; &quot;%1&quot;" />
+        </RegistryKey>
+      </RegistryKey>
+      <RegistryValue Root="HKLM" Key="Software\Classes\.pdf\OpenWithProgids" Name="PDFPlus.Document" Type="string" Value="" />
+
+      <RegistryKey Root="HKLM" Key="Software\Classes\Applications\PDFPlus.exe">
+        <RegistryValue Name="FriendlyAppName" Type="string" Value="PDFPlus" />
+        <RegistryKey Key="SupportedTypes">
+          <RegistryValue Name=".pdf" Type="string" Value="" />
+        </RegistryKey>
+        <RegistryKey Key="shell\open\command">
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot; &quot;%1&quot;" />
+        </RegistryKey>
+      </RegistryKey>
+
+      <RegistryKey Root="HKLM" Key="Software\PDFPlus\Capabilities">
+        <RegistryValue Name="ApplicationName" Type="string" Value="PDFPlus" />
+        <RegistryValue Name="ApplicationDescription" Type="string" Value="Fast PDF viewer and editor. No account, no subscription." />
+        <RegistryValue Name="ApplicationIcon" Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot;,0" />
+        <RegistryKey Key="FileAssociations">
+          <RegistryValue Name=".pdf" Type="string" Value="PDFPlus.Document" />
+        </RegistryKey>
+      </RegistryKey>
+      <RegistryValue Root="HKLM" Key="Software\RegisteredApplications" Name="PDFPlus" Type="string"
+                     Value="Software\PDFPlus\Capabilities" KeyPath="yes" />
+    </Component>
+  </Package>
+</Wix>

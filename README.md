@@ -64,6 +64,23 @@ This produces `dist\PDFPlus.exe`, a single self-contained file you can copy anyw
 
 For development: `dotnet run --project src\PDFPlus`.
 
+## Installer (MSI)
+
+```powershell
+.\build-installer.ps1
+```
+
+This produces `dist\PDFPlus-1.0.0-x64.msi` (built with [WiX Toolset 5](https://wixtoolset.org), MS-RL, restored from NuGet).
+
+- Installs for all users into Program Files, with a Start menu shortcut and an Add/Remove Programs entry
+- Registers PDFPlus for PDFs under "Open with" and Settings → Default apps (Windows doesn't let installers
+  take over the default app, so pick PDFPlus there if you want it to open PDFs on double-click)
+- Installing a newer version upgrades in place; uninstalling keeps your settings in `%APPDATA%\PDFPlus`
+- Silent install: `msiexec /i PDFPlus-1.0.0-x64.msi /qn`, add `DESKTOP_SHORTCUT=1` for a desktop shortcut
+
+The installed copy keeps its native libraries beside the exe instead of unpacking them, so it starts a little faster
+than the portable exe. Both builds are otherwise identical.
+
 ## Portable settings
 
 Settings (theme, recent files, saved signatures) are stored in `%APPDATA%\PDFPlus`. To keep them next to the exe

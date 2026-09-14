@@ -1,0 +1,25 @@
+<!-- MSI installer for PDFPlus, built with WiX Toolset 5 (MS-RL). Use .\build-installer.ps1 from the repo root. -->
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <PropertyGroup>
+    <OutputName>PDFPlus</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- Filled in by build-installer.ps1; these defaults match its layout. -->
+    <PublishDir Condition="'$(PublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\publish\</PublishDir>
+    <ArtDir Condition="'$(ArtDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\art\</ArtDir>
+    <IconPath>$(MSBuildThisFileDirectory)..\src\PDFPlus\Assets\PDFPlus.ico</IconPath>
+    <!--
+      ICE61: same-version reinstalls replace the installed copy, which is intended.
+      ICE43/ICE57: these assume shortcuts land in a per-user profile. This package is per-machine (ALLUSERS=1), so the
+      Start menu and desktop shortcuts go to the all-users folders and an HKLM/file key path is correct.
+    -->
+    <SuppressIces>ICE61;ICE43;ICE57</SuppressIces>
+    <DefineConstants>PublishDir=$(PublishDir);ArtDir=$(ArtDir);IconPath=$(IconPath)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+</Project>

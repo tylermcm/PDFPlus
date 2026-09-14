@@ -4,7 +4,9 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $dist = Join-Path $root 'dist'
 
-if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+# Replace only the portable exe so an installer built into dist\ survives.
+$exe = Join-Path $dist 'PDFPlus.exe'
+if (Test-Path $exe) { Remove-Item $exe -Force }
 
 dotnet publish (Join-Path $root 'src\PDFPlus\PDFPlus.csproj') -c Release -r win-x64 --self-contained true -o $dist -nologo
 if ($LASTEXITCODE -ne 0) { throw "Publish failed" }
