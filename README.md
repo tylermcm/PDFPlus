@@ -4,6 +4,14 @@ A fast, portable PDF viewer and editor for Windows. One exe, no installer, no ac
 
 ## Features
 
+**Home**
+- Opens with a dashboard: drop PDFs to open them, or drop pictures to turn them into a PDF
+- "Pick up where you left off": reopen the last file at the page you were reading (every file remembers its page)
+- Tool tiles (Edit, Fill & sign, Annotate, Organize, Combine, Images to PDF, Compress, Protect): pick a tool, then a file
+- Recent files with first-page previews, page counts and when you opened them; search, pin favorites to the top,
+  switch between thumbnails and a list, open with a specific tool, show in folder, or remove from the list
+- The house button next to the tabs brings Home back while documents are open
+
 **Viewing**
 - Tabs (open many PDFs at once; opening a PDF while PDFPlus is running adds a tab)
 - Smooth continuous scrolling with background rendering. Only visible pages are drawn, so huge documents stay fast
@@ -17,6 +25,15 @@ A fast, portable PDF viewer and editor for Windows. One exe, no installer, no ac
 - Reorder pages by dragging thumbnails (multi-select with Ctrl/Shift)
 - Rotate, delete, insert blank pages, insert pages from other PDFs (or drop PDFs onto the thumbnails)
 - Extract a page range to a new PDF, split a document every N pages, combine several PDFs into one
+
+**Edit** (toolbar → Edit, or press E)
+- Click a line of text and retype it in place; Enter saves, Esc cancels, empty text deletes the line
+- Keeps the position, size and color. The PDF's own font is reused when it has every character you type;
+  otherwise the matching Windows font (e.g. Calibri) is embedded as a small subset, usually a few tens of KB
+- Drag text or images to move them, drag an image's corner to resize it (Shift for free aspect), Del removes
+- Add images (PNG, JPG, BMP, GIF, TIFF) from the toolbar, the right-click menu, or by dropping them onto a page.
+  JPEGs are embedded unchanged and phone photos are rotated upright; PNG transparency is kept
+- Limits: edits one line at a time (no paragraph reflow), and text inside graphics or scanned pages can't be edited
 
 **Annotate** (toolbar → Annotate)
 - Highlight, underline and strike out text by dragging across it
@@ -64,6 +81,7 @@ instead (e.g. on a USB stick), create an empty file named `PDFPlus.settings.json
 | Ctrl+0 / Ctrl+1 / Ctrl+2 | Fit page / Actual size / Fit width |
 | F4 | Toggle sidebar |
 | V / H | Select tool / Hand tool |
+| E | Edit text and images (Enter retypes the selected text, Del deletes it) |
 | Home / End, Space | First / last page, page down |
 | Del (in sidebar) | Delete selected pages |
 | Esc | Finish placing text or a signature |
@@ -72,6 +90,7 @@ instead (e.g. on a USB stick), create an empty file named `PDFPlus.settings.json
 
 ```powershell
 python tools\make-sample-pdf.py tests\sample.pdf
+# tests\edit-sample.pdf: print tools\make-edit-sample.html with Edge (command inside the file)
 PDFPlus.exe --selftest tests\sample.pdf out   # engine checks, see out\selftest.log
 PDFPlus.exe --uitest tests\sample.pdf out     # renders UI screenshots off-screen
 ```
@@ -79,4 +98,5 @@ PDFPlus.exe --uitest tests\sample.pdf out     # renders UI screenshots off-scree
 ## Licenses
 
 PDFPlus uses [PDFium](https://pdfium.googlesource.com/pdfium/) (BSD-3-Clause), the PDF engine inside Chrome,
-via the prebuilt binaries from [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries).
+via the prebuilt binaries from [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries),
+and [PDFsharp](https://github.com/empira/PDFsharp) (MIT) for encryption and compaction.

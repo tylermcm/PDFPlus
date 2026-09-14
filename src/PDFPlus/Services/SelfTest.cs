@@ -184,6 +184,12 @@ internal static class SelfTest
             {
                 Check("compress images (tests/images.pdf missing)", false);
             }
+
+            // ---- Phase 3: editing existing text and images
+            await EditTestsAsync(input, outputDirectory, Check, log);
+
+            // ---- Home: images to PDF, previews
+            ImagesToPdfTests(input, outputDirectory, Check);
         }
         catch (Exception ex)
         {
@@ -192,6 +198,220 @@ internal static class SelfTest
 
         await File.WriteAllTextAsync(Path.Combine(outputDirectory, "selftest.log"), log.ToString());
         return failures;
+    }
+
+    private static async Task EditTestsAsync(string input, string outputDirectory, Action<string, bool, string> check, StringBuilder log)
+    {
+        var none = CancellationToken.None;
+        int ImageCount(PdfDocument d) => d.GetPageObjects(0).Count(o => !o.IsText);
+
+        using (var doc = await PdfDocument.OpenAsync(input, null))
+        {
+            var fox = doc.GetPageObjects(0).FirstOrDefault(o => o.IsText && o.Text.StartsWith("The quick brown fox"));
+            check("edit: find text run", fox != null, string.Join(" | ", doc.GetPageObjects(0).Where(o => o.IsText).Select(o => o.Text)));
+            if (fox == null) return;
+            log.AppendLine($"      run font={fox.Font} size={fox.FontSize:0.##} bounds={fox.Bounds}");
+
+            var before = RenderFull(doc, 0);
+            var result = doc.ReplaceText(fox, "The quick brown cat naps under the warm sun.");
+            check("edit: standard font reused", result.Outcome == TextFontOutcome.OriginalFont, result.ToString());
+            var hit = doc.Search("The quick brown cat", false, false, none).FirstOrDefault();
+            check("edit: new text searchable, old text gone", hit != null && doc.Search("jumps over the lazy", false, false, none).Count == 0, "");
+            if (hit != null)
+            {
+                var old = fox.Bounds;
+                check("edit: new text starts where the old did", Math.Abs(hit.Rects[0].X - old.X) < 1.5, $"{hit.Rects[0]} vs {old}");
+                var region = doc.GetPageToDisplay(0).TransformBounds(Rect.Union(old, hit.Rects[0]));
+                region.Inflate(4, 4);
+                var after = RenderFull(doc, 0);
+                var changed = CountChangedOutside(before, after, region);
+                check("edit: rest of the page untouched", changed < 30, $"{changed} pixels changed outside the edit");
+                SavePng(after, Path.Combine(outputDirectory, "edit-standard-font.png"));
+            }
+
+            var name = doc.GetPageObjects(0).FirstOrDefault(o => o.IsText && o.Text == "Name:");
+            if (name != null)
+            {
+                var unicode = doc.ReplaceText(name, "Namn → Łukasz:");
+                check("edit: characters the font lacks embed a Windows font",
+                    unicode.Outcome is TextFontOutcome.MatchingFont or TextFontOutcome.SubstituteFont &&
+                    doc.Search("Łukasz", false, false, none).Count == 1, unicode.ToString());
+            }
+            else
+            {
+                check("edit: find 'Name:' run", false, "");
+            }
+
+            var cat = doc.GetPageObjects(0).First(o => o.IsText && o.Text.StartsWith("The quick brown cat"));
+            doc.MoveObject(cat, new Vector(0, -120));
+            var moved = doc.GetPageObjects(0).FirstOrDefault(o => o.IsText && o.Text.StartsWith("The quick brown cat"));
+            var movedHit = doc.Search("The quick brown cat", false, false, none).FirstOrDefault();
+            check("edit: move text", moved != null && Math.Abs(moved.Bounds.Y - (cat.Bounds.Y - 120)) < 1 &&
+                                     movedHit != null && hit != null && Math.Abs(movedHit.Rects[0].Y - (hit.Rects[0].Y - 120)) < 1.5,
+                $"{moved?.Bounds} / {movedHit?.Rects[0]}");
+
+            var png = Path.Combine(outputDirectory, "edit-image.png");
+            WriteTestImage(png, 360, 240);
+            var imagesBefore = ImageCount(doc);
+            var placed = doc.AddImage(0, png, new Point(420, 330));
+            var image = doc.GetPageObjects(0).LastOrDefault(o => !o.IsText);
+            check("edit: add image", ImageCount(doc) == imagesBefore + 1 && image != null, placed.ToString());
+            if (image != null)
+            {
+                var shown = doc.GetPageToDisplay(0).TransformBounds(image.Bounds);
+                check("edit: image lands where placed", Math.Abs(shown.X - placed.X) < 1 && Math.Abs(shown.Y - placed.Y) < 1 && Math.Abs(shown.Width - placed.Width) < 1,
+                    $"{shown} vs {placed}");
+                doc.ResizeImage(image, new Rect(image.Bounds.X, image.Bounds.Y, image.Bounds.Width / 2, image.Bounds.Height / 2));
+                var resized = doc.GetPageObjects(0).Last(o => !o.IsText);
+                check("edit: resize image", Math.Abs(resized.Bounds.Width - image.Bounds.Width / 2) < 1, resized.Bounds.ToString());
+                doc.MoveObject(resized, new Vector(-250, 0));
+                var render = RenderFull(doc, 0);
+                SavePng(render, Path.Combine(outputDirectory, "edit-image-page.png"));
+                check("edit: image renders", CountColored(render) > 3000, $"{CountColored(render)} colored pixels");
+            }
+
+            var editedPath = Path.Combine(outputDirectory, "edited-sample.pdf");
+            doc.Save(editedPath);
+            var growth = new FileInfo(editedPath).Length - new FileInfo(input).Length;
+            using (var reopened = await PdfDocument.OpenAsync(editedPath, null))
+                check("edit: edits survive save", reopened.Search("Łukasz", false, false, none).Count == 1 &&
+                                                  reopened.Search("brown cat naps", false, false, none).Count == 1 && ImageCount(reopened) == imagesBefore + 1,
+                    $"file grew {growth:N0} bytes");
+
+            doc.DeleteObject(doc.GetPageObjects(0).Last(o => !o.IsText));
+            check("edit: delete image", ImageCount(doc) == imagesBefore, "");
+            doc.Undo();
+            check("edit: undo brings it back", ImageCount(doc) == imagesBefore + 1, "");
+        }
+
+        var samplePath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input))!, "edit-sample.pdf");
+        if (!File.Exists(samplePath))
+        {
+            check("edit sample (tests/edit-sample.pdf missing)", false, "");
+            return;
+        }
+        using (var doc = await PdfDocument.OpenAsync(samplePath, null))
+        {
+            var objects = doc.GetPageObjects(0);
+            foreach (var o in objects)
+                log.AppendLine($"      {o.Kind} [{string.Join(",", o.Indices)}] \"{o.Text}\" {o.Font?.PdfName} -> {o.Font?.Family} w{o.Font?.Weight} " +
+                               $"size={o.FontSize:0.##} bounds={o.Bounds.X:0.#},{o.Bounds.Y:0.#} {o.Bounds.Width:0.#}x{o.Bounds.Height:0.#}");
+
+            var invoice = objects.FirstOrDefault(o => o.IsText && o.Text.StartsWith("Invoice number"));
+            check("edit sample: find invoice line", invoice != null, "");
+            if (invoice == null) return;
+            var before = RenderFull(doc, 0);
+            var reuse = doc.ReplaceText(invoice, "Invoice number: INV-10244");
+            check("edit sample: subset font reused for glyphs it has", reuse.Outcome == TextFontOutcome.OriginalFont, reuse.ToString());
+            var afterReuse = RenderFull(doc, 0);
+            var region = doc.GetPageToDisplay(0).TransformBounds(invoice.Bounds);
+            region.Inflate(4, 4);
+            var changed = CountChangedOutside(before, afterReuse, region);
+            check("edit sample: rest of the page untouched", changed < 30, $"{changed} pixels changed outside the edit");
+            SavePng(before, Path.Combine(outputDirectory, "edit-sample-before.png"));
+            SavePng(afterReuse, Path.Combine(outputDirectory, "edit-sample-reuse.png"));
+
+            invoice = doc.GetPageObjects(0).First(o => o.IsText && o.Text.StartsWith("Invoice number"));
+            var match = doc.ReplaceText(invoice, "Invoice number: INV-10599 (paid)");
+            check("edit sample: missing glyphs embed matching Windows font",
+                match.Outcome == TextFontOutcome.MatchingFont && match.FontFamily == "Calibri" &&
+                doc.Search("INV-10599 (paid)", false, false, none).Count == 1, match.ToString());
+
+            var bold = objects.FirstOrDefault(o => o.IsText && o.Text.Contains("4.2 million"));
+            check("edit sample: bold words are their own run", bold?.Font?.Bold == true, bold?.Text ?? "none");
+
+            var picture = doc.GetPageObjects(0).FirstOrDefault(o => !o.IsText);
+            check("edit sample: canvas image found", picture != null, "");
+            if (picture != null)
+            {
+                doc.MoveObject(picture, new Vector(60, 0));
+                var movedPicture = doc.GetPageObjects(0).FirstOrDefault(o => !o.IsText);
+                check("edit sample: move image", movedPicture != null && Math.Abs(movedPicture.Bounds.X - picture.Bounds.X - 60) < 1, movedPicture?.Bounds.ToString() ?? "");
+            }
+            SavePng(RenderFull(doc, 0), Path.Combine(outputDirectory, "edit-sample-final.png"));
+
+            var editedPath = Path.Combine(outputDirectory, "edit-sample-edited.pdf");
+            doc.Save(editedPath);
+            var growth = new FileInfo(editedPath).Length - new FileInfo(samplePath).Length;
+            using var reopened = await PdfDocument.OpenAsync(editedPath, null);
+            check("edit sample: saved with a small font subset", growth < 80_000 && reopened.Search("INV-10599 (paid)", false, false, none).Count == 1,
+                $"file grew {growth:N0} bytes");
+        }
+    }
+
+    private static void ImagesToPdfTests(string input, string outputDirectory, Action<string, bool, string> check)
+    {
+        var wide = Path.Combine(outputDirectory, "images-wide.png");
+        var tall = Path.Combine(outputDirectory, "images-tall.png");
+        WriteTestImage(wide, 400, 300);
+        WriteTestImage(tall, 200, 500);
+        using (var doc = PdfDocument.CreateFromImages([wide, tall]))
+        {
+            PageSize first = doc.PageSizes[0], second = doc.PageSizes[1];
+            check("images to pdf: a page per picture, no undo history", doc.PageCount == 2 && !doc.CanUndo && doc.IsDirty, $"{doc.PageCount} pages");
+            check("images to pdf: pages shaped like the pictures",
+                Math.Abs(first.Width - 792) < 0.5 && Math.Abs(first.Height - 594) < 0.5 && Math.Abs(second.Height - 792) < 0.5 && Math.Abs(second.Width - 316.8) < 0.5,
+                $"{first.Width}x{first.Height}, {second.Width}x{second.Height}");
+            var render = RenderFull(doc, 1);
+            var pixels = new int[render.PixelWidth * render.PixelHeight];
+            render.CopyPixels(pixels, render.PixelWidth * 4, 0);
+            var covered = pixels.Count(p => ((p >> 16) & 0xFF) + ((p >> 8) & 0xFF) + (p & 0xFF) < 750) / (double)pixels.Length;
+            check("images to pdf: picture fills its page", covered > 0.9, $"{covered:P0} covered");
+            var path = Path.Combine(outputDirectory, "images-to-pdf.pdf");
+            doc.Save(path);
+            check("images to pdf: saves", new FileInfo(path).Length > 1000, $"{new FileInfo(path).Length:N0} bytes");
+        }
+
+        var preview = PdfThumbnail.Render(input, 150, 200);
+        check("home preview: first page thumbnail", preview.Image is { PixelHeight: > 150 } && preview.PageCount == 43 && !preview.IsProtected,
+            $"{preview.Image?.PixelWidth}x{preview.Image?.PixelHeight}, {preview.PageCount} pages");
+        var locked = Path.Combine(outputDirectory, "protected.pdf");
+        if (File.Exists(locked)) check("home preview: protected file", PdfThumbnail.Render(locked, 150, 200).IsProtected, "");
+    }
+
+    private static BitmapSource RenderFull(PdfDocument doc, int page)
+    {
+        var size = doc.PageSizes[page];
+        int w = (int)Math.Round(size.Width), h = (int)Math.Round(size.Height);
+        return doc.Render(page, w, h, new Int32Rect(0, 0, w, h))!;
+    }
+
+    private static int CountChangedOutside(BitmapSource a, BitmapSource b, Rect region)
+    {
+        int w = a.PixelWidth, h = a.PixelHeight;
+        var pa = new int[w * h];
+        var pb = new int[w * h];
+        a.CopyPixels(pa, w * 4, 0);
+        b.CopyPixels(pb, w * 4, 0);
+        var changed = 0;
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+        {
+            if (region.Contains(x + 0.5, y + 0.5)) continue;
+            int p = pa[y * w + x], q = pb[y * w + x];
+            var diff = Math.Abs(((p >> 16) & 0xFF) - ((q >> 16) & 0xFF)) + Math.Abs(((p >> 8) & 0xFF) - ((q >> 8) & 0xFF)) + Math.Abs((p & 0xFF) - (q & 0xFF));
+            if (diff > 24) changed++;
+        }
+        return changed;
+    }
+
+    private static void WriteTestImage(string path, int width, int height)
+    {
+        var pixels = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var i = (y * width + x) * 4;
+            pixels[i] = (byte)(255 * y / height);
+            pixels[i + 1] = (byte)(80 + 100 * x / width);
+            pixels[i + 2] = (byte)(255 - 255 * x / width);
+            pixels[i + 3] = x > width - 40 && y < 40 ? (byte)0 : (byte)255;
+        }
+        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = File.Create(path);
+        encoder.Save(stream);
     }
 
     private static int CountInk(BitmapSource bitmap)

@@ -70,6 +70,8 @@ public sealed unsafe partial class PdfDocument : IDisposable
 
     private readonly List<byte[]> _undo = new();
     private readonly List<byte[]> _redo = new();
+    /// <summary>Set while building a brand-new document, where undo steps would only waste memory.</summary>
+    private bool _suppressUndo;
 
     public event EventHandler? PagesChanged;
     public event EventHandler<int>? PageContentChanged;
@@ -896,6 +898,7 @@ public sealed unsafe partial class PdfDocument : IDisposable
 
     private void PushUndo()
     {
+        if (_suppressUndo) return;
         _undo.Add(Snapshot());
         _redo.Clear();
         long total = _undo.Sum(b => (long)b.Length);

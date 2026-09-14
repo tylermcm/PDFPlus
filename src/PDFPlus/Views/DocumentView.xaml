@@ -112,13 +112,15 @@
         <GridSplitter x:Name="Splitter" Grid.Column="1" Width="5" Margin="-3,0,-2,0" Background="Transparent"
                       HorizontalAlignment="Stretch" ResizeBehavior="PreviousAndNext" Focusable="False" />
 
-        <Grid x:Name="ViewerHost" Grid.Column="2" Background="{DynamicResource Brush.Canvas}" ClipToBounds="True">
+        <Grid x:Name="ViewerHost" Grid.Column="2" Background="{DynamicResource Brush.Canvas}" ClipToBounds="True"
+              AllowDrop="True" DragOver="OnViewerDragOver" Drop="OnViewerDrop">
             <ScrollViewer x:Name="Scroller" CanContentScroll="True" Focusable="False"
                           HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Visible">
                 <controls:PdfView x:Name="View" />
             </ScrollViewer>
 
             <views:AnnotationLayer x:Name="Annotations" Margin="0,0,12,0" />
+            <views:EditLayer x:Name="Edits" Margin="0,0,12,0" />
             <views:StampLayer x:Name="Stamps" Margin="0,0,12,0" />
 
             <Border x:Name="PlacementHint" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,14,0,0"

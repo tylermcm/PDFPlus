@@ -389,7 +389,7 @@ public sealed class AnnotationLayer : Canvas
         ShowFloating(Chrome(panel), "selection", info.PageIndex, new Point(display.Left, display.Top));
     }
 
-    private static Button BarButton(string glyph, string tip, Action action)
+    internal static Button BarButton(string glyph, string tip, Action action)
     {
         var button = new Button
         {
@@ -456,7 +456,7 @@ public sealed class AnnotationLayer : Canvas
 
     // ---------------------------------------------------------------- floating panels
 
-    private static Border Chrome(UIElement child)
+    internal static Border Chrome(UIElement child)
     {
         var border = new Border
         {

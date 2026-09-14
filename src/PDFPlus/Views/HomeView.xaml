@@ -1,0 +1,365 @@
+<UserControl x:Class="PDFPlus.Views.HomeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="False" AllowDrop="True"
+             DragOver="OnDragOver" DragLeave="OnDragLeave" Drop="OnDrop">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Brush.Toolbar}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+        </Style>
+
+        <Style x:Key="CardButton" TargetType="Button">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{DynamicResource Brush.Toolbar}" BorderBrush="{DynamicResource Brush.Border}"
+                                BorderThickness="1" CornerRadius="12" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.TabHover}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="RowButton" TargetType="Button">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="8" Padding="10,7">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="LinkButton" TargetType="Button">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+            <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="10,6">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.AccentSoft}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Pill" TargetType="ToggleButton" BasedOn="{StaticResource ToolToggle}">
+            <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="12,0" />
+        </Style>
+
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="Dim" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextDim}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <Style x:Key="Placeholder" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+            <Setter Property="Foreground" Value="#8A8F99" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- Recent file as a card with a peek at page 1 -->
+        <DataTemplate x:Key="RecentCardTemplate">
+            <Button Style="{StaticResource CardButton}" Width="178" Margin="0,0,14,14" Tag="{Binding}" Opacity="{Binding Opacity}"
+                    ToolTip="{Binding FullPath}" Click="OnRecentClick" MouseRightButtonUp="OnRecentRightClick">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="190" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Border CornerRadius="11,11,0,0" Background="{DynamicResource Brush.Sidebar}" ClipToBounds="True">
+                        <Grid>
+                            <Border Width="146" Margin="0,16,0,0" VerticalAlignment="Top" Background="White" BorderBrush="#24000000" BorderThickness="1"
+                                    Visibility="{Binding HasThumbnail, Converter={StaticResource BoolToVisibility}}">
+                                <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+                            </Border>
+                            <Border Width="128" Height="160" Margin="0,16,0,0" VerticalAlignment="Top" Background="White" BorderBrush="#24000000"
+                                    BorderThickness="1" Visibility="{Binding ShowPlaceholder, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{Binding PlaceholderGlyph}" Style="{StaticResource Placeholder}" FontSize="30" />
+                            </Border>
+                            <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8" Width="26" Height="26" CornerRadius="13"
+                                    Background="{DynamicResource Brush.Accent}" ToolTip="Pinned"
+                                    Visibility="{Binding IsPinned, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="&#xE718;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="White"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <Button Style="{StaticResource ToolButton}" Content="&#xE712;" Tag="{Binding}" ToolTip="More" Width="32" Height="32" MinWidth="32"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="6" Background="{DynamicResource Brush.Toolbar}"
+                                    Click="OnRecentMoreClick"
+                                    Visibility="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}, Converter={StaticResource BoolToVisibility}}" />
+                        </Grid>
+                    </Border>
+                    <StackPanel Grid.Row="1" Margin="12,10,12,12">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Detail}" Style="{StaticResource Dim}" Margin="0,3,0,0" />
+                    </StackPanel>
+                </Grid>
+            </Button>
+        </DataTemplate>
+
+        <!-- Recent file as a table row -->
+        <DataTemplate x:Key="RecentRowTemplate">
+            <Button Style="{StaticResource RowButton}" Tag="{Binding}" Opacity="{Binding Opacity}" ToolTip="{Binding FullPath}"
+                    Click="OnRecentClick" MouseRightButtonUp="OnRecentRightClick">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="46" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="80" />
+                        <ColumnDefinition Width="76" />
+                    </Grid.ColumnDefinitions>
+                    <Border Width="32" Height="40" HorizontalAlignment="Left" Background="White" BorderBrush="#24000000" BorderThickness="1">
+                        <Grid>
+                            <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+                            <TextBlock Text="{Binding PlaceholderGlyph}" Style="{StaticResource Placeholder}" FontSize="14"
+                                       Visibility="{Binding ShowPlaceholder, Converter={StaticResource BoolToVisibility}}" />
+                        </Grid>
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE718;" FontFamily="{StaticResource IconFont}" FontSize="11" Margin="0,1,6,0" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource Brush.Accent}" ToolTip="Pinned"
+                                       Visibility="{Binding IsPinned, Converter={StaticResource BoolToVisibility}}" />
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding FolderOrStatus}" Style="{StaticResource Dim}" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="{Binding PagesText}" Style="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="{Binding OpenedText}" Style="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="4" Text="{Binding SizeText}" Style="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="5" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Style="{StaticResource ToolButton}" Content="{Binding PinGlyph}" ToolTip="{Binding PinTip}" Tag="{Binding}"
+                                FontSize="13" Width="32" Height="32" MinWidth="32" Click="OnPinClick" />
+                        <Button Style="{StaticResource ToolButton}" Content="&#xE712;" ToolTip="More" Tag="{Binding}"
+                                Width="32" Height="32" MinWidth="32" Click="OnRecentMoreClick" />
+                    </StackPanel>
+                </Grid>
+            </Button>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid Background="{DynamicResource Brush.Canvas}">
+        <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+            <StackPanel MaxWidth="1180" Margin="36,26,36,30">
+
+                <!-- Greeting -->
+                <DockPanel Margin="2,0,0,20">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button Content="&#xE765;" Style="{StaticResource ToolButton}" ToolTip="Keyboard shortcuts" Click="OnShortcutsClick" />
+                        <Button Content="&#xE706;" Style="{StaticResource ToolButton}" ToolTip="Switch light / dark theme" Click="OnThemeClick" />
+                        <Button Content="&#xE946;" Style="{StaticResource ToolButton}" ToolTip="About PDFPlus" Click="OnAboutClick" />
+                    </StackPanel>
+                    <Image x:Name="Logo" Width="46" Height="46" Margin="0,0,14,0" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="Greeting" FontSize="26" FontWeight="SemiBold" />
+                        <TextBlock x:Name="Subtitle" Foreground="{DynamicResource Brush.TextDim}" Margin="0,2,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+
+                <!-- Drop zone + pick up where you left off -->
+                <Grid Margin="0,0,0,30">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="ContinueColumn" Width="400" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Style="{StaticResource Card}" MinHeight="196" Padding="14">
+                        <Grid>
+                            <Rectangle x:Name="DropOutline" RadiusX="9" RadiusY="9" StrokeThickness="1.5" StrokeDashArray="5 4"
+                                       Stroke="{DynamicResource Brush.Border}" />
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16">
+                                <Border Width="54" Height="54" CornerRadius="27" Background="{DynamicResource Brush.AccentSoft}" HorizontalAlignment="Center">
+                                    <TextBlock Text="&#xE8E5;" FontFamily="{StaticResource IconFont}" FontSize="23" Foreground="{DynamicResource Brush.Accent}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock x:Name="DropTitle" Text="Drop PDFs here to open them" FontSize="16" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center" Margin="0,12,0,2" />
+                                <TextBlock Text="Drop pictures to turn them into a PDF" Style="{StaticResource Dim}" HorizontalAlignment="Center" />
+                                <WrapPanel HorizontalAlignment="Center" Margin="0,16,0,0">
+                                    <Button Content="Open PDF…" Style="{StaticResource AccentButton}" Height="36" Padding="20,0" Margin="4" Click="OnOpenClick" />
+                                    <Button Content="Combine files…" Style="{StaticResource SecondaryButton}" Height="36" Padding="16,0" Margin="4" Click="OnCombineClick" />
+                                    <Button Content="Images to PDF…" Style="{StaticResource SecondaryButton}" Height="36" Padding="16,0" Margin="4" Click="OnImagesClick" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border x:Name="ContinueCard" Grid.Column="1" Style="{StaticResource Card}" Margin="16,0,0,0" Padding="22,18">
+                        <Grid>
+                            <DockPanel x:Name="ContinuePanel">
+                                <TextBlock DockPanel.Dock="Top" Text="PICK UP WHERE YOU LEFT OFF" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource Brush.TextDim}" Margin="0,0,0,12" />
+                                <Border DockPanel.Dock="Left" Width="104" Height="132" Margin="0,0,18,0" Background="White" BorderBrush="#24000000"
+                                        BorderThickness="1" VerticalAlignment="Top" ClipToBounds="True">
+                                    <Grid>
+                                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" VerticalAlignment="Top" RenderOptions.BitmapScalingMode="HighQuality" />
+                                        <TextBlock Text="{Binding PlaceholderGlyph}" Style="{StaticResource Placeholder}" FontSize="26"
+                                                   Visibility="{Binding ShowPlaceholder, Converter={StaticResource BoolToVisibility}}" />
+                                    </Grid>
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" MaxHeight="42" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding ResumeText}" Foreground="{DynamicResource Brush.TextDim}" Margin="0,6,0,0" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding OpenedText}" Style="{StaticResource Dim}" Margin="0,2,0,0" />
+                                    <Button x:Name="ContinueButton" Style="{StaticResource AccentButton}" HorizontalAlignment="Left" Margin="0,14,0,0"
+                                            Height="34" Padding="18,0" Click="OnContinueClick" />
+                                </StackPanel>
+                            </DockPanel>
+
+                            <DockPanel x:Name="TipPanel" Visibility="Collapsed">
+                                <TextBlock DockPanel.Dock="Top" Text="QUICK TIP" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource Brush.TextDim}" Margin="0,0,0,12" />
+                                <Button DockPanel.Dock="Bottom" Content="Next tip" Style="{StaticResource LinkButton}" HorizontalAlignment="Left"
+                                        Margin="-10,8,0,-6" Click="OnNextTipClick" />
+                                <Border DockPanel.Dock="Left" Width="44" Height="44" CornerRadius="10" Margin="0,0,16,0" VerticalAlignment="Top"
+                                        Background="{DynamicResource Brush.AccentSoft}">
+                                    <TextBlock x:Name="TipGlyph" FontFamily="{StaticResource IconFont}" FontSize="20" Foreground="{DynamicResource Brush.Accent}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel>
+                                    <TextBlock x:Name="TipTitle" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="TipText" Foreground="{DynamicResource Brush.TextDim}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DockPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- Tools -->
+                <DockPanel Margin="2,0,2,12">
+                    <TextBlock DockPanel.Dock="Right" Text="Choose a tool, then pick a file" Style="{StaticResource Dim}" VerticalAlignment="Bottom" />
+                    <TextBlock Text="Tools" Style="{StaticResource SectionTitle}" />
+                </DockPanel>
+                <UniformGrid x:Name="ToolGrid" Columns="4" Margin="0,0,-14,16" />
+
+                <!-- Recent files -->
+                <DockPanel Margin="2,0,0,12">
+                    <StackPanel x:Name="RecentTools" DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Grid Width="220" Margin="0,0,10,0">
+                            <TextBox x:Name="SearchBox" Height="32" Padding="30,0,8,0" TextChanged="OnSearchChanged" />
+                            <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="12" Margin="11,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource Brush.TextDim}" IsHitTestVisible="False" />
+                            <TextBlock x:Name="SearchHint" Text="Search recent files" Style="{StaticResource Dim}" FontSize="13" Margin="31,0,0,0"
+                                       VerticalAlignment="Center" IsHitTestVisible="False" />
+                        </Grid>
+                        <ToggleButton x:Name="AllFilter" Content="All" Style="{StaticResource Pill}" Click="OnFilterClick" />
+                        <ToggleButton x:Name="PinnedFilter" Content="Pinned" Style="{StaticResource Pill}" Margin="2,0,0,0" Click="OnFilterClick" />
+                        <Border Width="1" Height="20" Margin="8,0" Background="{DynamicResource Brush.Border}" />
+                        <ToggleButton x:Name="GridToggle" Content="&#xF0E2;" Style="{StaticResource ToolToggle}" FontSize="14" ToolTip="Thumbnails" Click="OnLayoutClick" />
+                        <ToggleButton x:Name="ListToggle" Content="&#xE8FD;" Style="{StaticResource ToolToggle}" FontSize="14" ToolTip="List" Click="OnLayoutClick" />
+                        <Button x:Name="ClearButton" Content="Clear" Style="{StaticResource LinkButton}" Margin="4,0,0,0"
+                                ToolTip="Remove files that aren't pinned from this list" Click="OnClearClick" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Recent" Style="{StaticResource SectionTitle}" />
+                        <Border x:Name="RecentCountBadge" Margin="8,2,0,0" CornerRadius="9" Padding="7,1" VerticalAlignment="Center"
+                                Background="{DynamicResource Brush.Hover}">
+                            <TextBlock x:Name="RecentCount" FontSize="11.5" Foreground="{DynamicResource Brush.TextDim}" />
+                        </Border>
+                    </StackPanel>
+                </DockPanel>
+
+                <ItemsControl x:Name="RecentGrid" Focusable="False" Margin="0,0,-14,0" ItemTemplate="{StaticResource RecentCardTemplate}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+
+                <Border x:Name="RecentListCard" Style="{StaticResource Card}" Padding="8" Visibility="Collapsed">
+                    <StackPanel>
+                        <Grid Margin="10,4,10,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="46" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="120" />
+                                <ColumnDefinition Width="80" />
+                                <ColumnDefinition Width="76" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="1" Text="NAME" Style="{StaticResource Dim}" FontSize="11" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="2" Text="PAGES" Style="{StaticResource Dim}" FontSize="11" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="3" Text="OPENED" Style="{StaticResource Dim}" FontSize="11" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="4" Text="SIZE" Style="{StaticResource Dim}" FontSize="11" FontWeight="SemiBold" />
+                        </Grid>
+                        <Border Height="1" Background="{DynamicResource Brush.Border}" Margin="8,0,8,4" />
+                        <ItemsControl x:Name="RecentRows" Focusable="False" ItemTemplate="{StaticResource RecentRowTemplate}" />
+                    </StackPanel>
+                </Border>
+
+                <Border x:Name="EmptyRecent" Style="{StaticResource Card}" Padding="28,30" Visibility="Collapsed">
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="&#xE81C;" FontFamily="{StaticResource IconFont}" FontSize="30" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource Brush.TextDim}" />
+                        <TextBlock Text="Nothing here yet" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,4" />
+                        <TextBlock Text="PDFs you open show up here with a preview of their first page, so you can jump straight back in."
+                                   Foreground="{DynamicResource Brush.TextDim}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="NoMatches" Foreground="{DynamicResource Brush.TextDim}" Margin="4,8,0,0" Visibility="Collapsed" />
+
+                <TextBlock Text="PDFPlus is free and works offline. No account, no subscription, and your files never leave this computer."
+                           Style="{StaticResource Dim}" HorizontalAlignment="Center" Margin="0,26,0,0" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

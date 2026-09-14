@@ -39,6 +39,26 @@ internal static class UiTest
 
         try
         {
+            // Home screen: a made-up recent history (test mode never loads or saves the real settings).
+            var testFolder = Path.GetDirectoryName(Path.GetFullPath(input))!;
+            var recent = AppSettings.Current;
+            var seeds = new (string Name, double HoursAgo, int Page, bool Pinned)[]
+            {
+                ("quarterly-report-2025.pdf", 400, 0, false), // doesn't exist: shows the "not found" state
+                ("images.pdf", 30, 1, false),
+                ("edit-sample.pdf", 5, 0, true),
+                (Path.GetFileName(input), 2, 11, false),
+            };
+            foreach (var (name, hoursAgo, page, pinned) in seeds)
+            {
+                var path = Path.Combine(testFolder, name);
+                recent.AddRecent(path);
+                var details = recent.DetailsFor(path)!;
+                details.Opened = DateTime.Now.AddHours(-hoursAgo);
+                details.Page = page;
+                if (pinned) recent.SetPinned(path, true);
+            }
+
             var window = new MainWindow { ShowActivated = false };
             window.WindowState = WindowState.Normal;
             window.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -47,9 +67,10 @@ internal static class UiTest
             window.Width = 1400;
             window.Height = 900;
             window.Show();
-            await Settle(700);
-            Snap(window, "01-welcome");
+            await Settle(2000);
+            Snap(window, "01-home");
 
+            recent.RememberPage(Path.GetFullPath(input), 0);
             await window.OpenFileAsync(input);
             await Settle(1800);
             var view = window.DocumentHost.Children.OfType<DocumentView>().First();
@@ -107,6 +128,16 @@ internal static class UiTest
             Snap(dialog, "10-signature-dialog");
             dialog.Close();
 
+            var shortcuts = ShortcutsDialog.Create(null);
+            shortcuts.ShowActivated = false;
+            shortcuts.WindowStartupLocation = WindowStartupLocation.Manual;
+            shortcuts.Left = -30000;
+            shortcuts.Top = 0;
+            shortcuts.Show();
+            await Settle(600);
+            Snap(shortcuts, "10b-shortcuts");
+            shortcuts.Close();
+
             // Phase 2: annotate mode, selection bar and note editor.
             view.Viewer.FitMode = FitMode.Width;
             view.Viewer.GoToPage(0);
@@ -155,6 +186,74 @@ internal static class UiTest
             menu.IsOpen = false;
             view.Viewer.ClearSelection();
 
+            // Phase 3: Edit mode on the sample, then on a browser-made PDF with embedded subset fonts.
+            window.SetToolMode(MainWindow.ToolMode.Edit);
+            view.Viewer.FitMode = FitMode.Width;
+            view.Viewer.GoToPage(0);
+            await Settle(1200);
+            var line = doc.GetPageObjects(0).First(o => o.IsText && o.Text.StartsWith("Select this text"));
+            view.Edits.SetHover(line);
+            await Settle(300);
+            Snap(window, "16-edit-mode");
+            view.Edits.OpenEditor(line);
+            await Settle(400);
+            if (FindDescendant<TextBox>(view.Edits) is { } lineEditor) lineEditor.Text = "Select this line and type whatever you like here.";
+            await Settle(400);
+            Snap(window, "17-text-editor");
+            view.Edits.CommitEditor();
+            await Settle(1500);
+            Snap(window, "18-text-edited");
+
+            var picture = Path.Combine(outputDirectory, "uitest-picture.png");
+            WritePicture(picture);
+            view.AddImageAt(0, new Point(430, 440), picture);
+            await Settle(1500);
+            Snap(window, "19-image-selected");
+
+            var realWorld = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input))!, "edit-sample.pdf");
+            if (File.Exists(realWorld))
+            {
+                await window.OpenFileAsync(realWorld);
+                await Settle(1500);
+                var sampleView = window.DocumentHost.Children.OfType<DocumentView>().Last();
+                sampleView.Viewer.SetZoom(1.5);
+                sampleView.Viewer.GoToPage(0);
+                await Settle(1500);
+                var invoice = sampleView.Document.GetPageObjects(0).First(o => o.IsText && o.Text.StartsWith("Invoice"));
+                sampleView.Edits.OpenEditor(invoice);
+                await Settle(400);
+                if (FindDescendant<TextBox>(sampleView.Edits) is { } invoiceEditor) invoiceEditor.Text = "Invoice number: INV-10599 (paid)";
+                await Settle(400);
+                Snap(window, "20-real-world-editor");
+                sampleView.Edits.CommitEditor();
+                await Settle(1800);
+                Snap(window, "21-real-world-edited");
+                sampleView.Document.Save(Path.Combine(outputDirectory, "uitest-edit-sample.pdf"));
+                log.AppendLine("saved uitest-edit-sample.pdf");
+            }
+            else
+            {
+                failures++;
+                log.AppendLine("FAIL tests/edit-sample.pdf missing");
+            }
+
+            // Home again, with documents open: thumbnails, list layout and dark theme.
+            window.ShowHome();
+            await Settle(1800);
+            Snap(window, "22-home-with-tabs");
+            window.Home.Scroller.ScrollToEnd();
+            await Settle(500);
+            Snap(window, "25-home-recent-cards");
+            window.Home.Scroller.ScrollToTop();
+            window.Home.SetLayout(true);
+            await Settle(600);
+            Snap(window, "23-home-list");
+            ThemeManager.Apply(true);
+            await Settle(900);
+            Snap(window, "24-home-list-dark");
+            ThemeManager.Apply(false);
+            window.Home.SetLayout(false);
+
             // Leave the document clean so closing the window does not prompt.
             doc.Save(Path.Combine(outputDirectory, "uitest-result.pdf"));
             log.AppendLine($"saved uitest-result.pdf, pages={doc.PageCount}");
@@ -185,6 +284,28 @@ internal static class UiTest
         return new SavedSignature { Data = GeometryData.ToMarkup(figures), Width = bounds.Width, Height = bounds.Height };
     }
 
+    private static void WritePicture(string path)
+    {
+        const int width = 320, height = 200;
+        var pixels = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var i = (y * width + x) * 4;
+            var sun = (x - 230) * (x - 230) + (y - 60) * (y - 60) < 900;
+            var hill = y > 140 - 30 * Math.Sin(x / 45.0);
+            (pixels[i + 2], pixels[i + 1], pixels[i]) = sun ? ((byte)255, (byte)196, (byte)40)
+                : hill ? ((byte)60, (byte)(150 + y / 4), (byte)80)
+                : ((byte)(120 + y / 3), (byte)(180 + y / 5), (byte)250);
+            pixels[i + 3] = 255;
+        }
+        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = File.Create(path);
+        encoder.Save(stream);
+    }
+
     private static void SaveElement(FrameworkElement element, string path)
     {
         element.UpdateLayout();
@@ -208,8 +329,9 @@ internal static class UiTest
         window.UpdateLayout();
         var content = (FrameworkElement)window.Content;
         var dpi = VisualTreeHelper.GetDpi(window);
-        var width = content.ActualWidth;
-        var height = content.ActualHeight;
+        // Include the content's own margin, or dialogs lose their right and bottom edges (where the buttons are).
+        var width = content.ActualWidth + content.Margin.Left + content.Margin.Right;
+        var height = content.ActualHeight + content.Margin.Top + content.Margin.Bottom;
         var bitmap = new RenderTargetBitmap(
             (int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY),
             dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);

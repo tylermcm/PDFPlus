@@ -109,6 +109,10 @@ public partial class DocumentView : UserControl, IDisposable
         Annotations.Attach(View, document);
         Annotations.SelectionChanged += (_, _) => RaiseStatus();
         View.PreviewPageClick = (hit, clicks) => Annotations.TrySelectAt(hit, clicks);
+        Edits.Attach(View, document);
+        Edits.Message += (_, message) => ShowToast(message);
+        Edits.SelectionChanged += (_, _) => RaiseStatus();
+        Edits.AddImageRequested += (_, hit) => AddImage(hit);
 
         _thumbTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _thumbTimer.Tick += (_, _) => FlushThumbnails();
@@ -150,7 +154,12 @@ public partial class DocumentView : UserControl, IDisposable
 
     public void FocusViewer() => Dispatcher.BeginInvoke(() => View.Focus(), DispatcherPriority.Input);
 
-    public void CommitStamps() => Stamps.Commit();
+    /// <summary>Finishes anything half-done on the page (a live stamp or text being retyped) so it's part of the document.</summary>
+    public void CommitStamps()
+    {
+        Stamps.Commit();
+        Edits.CommitEditor();
+    }
 
     // ---------------------------------------------------------------- sidebar
 
@@ -707,6 +716,85 @@ public partial class DocumentView : UserControl, IDisposable
 
     public void DeleteSelectedAnnotation() => Annotations.DeleteSelected();
 
+    // ---------------------------------------------------------------- editing text & images
+
+    internal static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"];
+    internal const string ImageFilter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff|All files (*.*)|*.*";
+
+    /// <summary>Raised when something (like adding an image) should switch the window into Edit mode.</summary>
+    public event EventHandler? EditModeRequested;
+
+    public bool EditMode => Edits.IsActive;
+    public bool HasSelectedObject => Edits.Selected != null;
+
+    public void SetEditMode(bool on)
+    {
+        if (Edits.IsActive == on) return;
+        if (on)
+        {
+            Stamps.Commit();
+            Disarm();
+            Annotations.Tool = AnnotationTool.None;
+            View.ClearSelection();
+        }
+        Edits.IsActive = on;
+        FocusViewer();
+        RaiseStatus();
+    }
+
+    /// <summary>Asks for a picture and adds it at <paramref name="at"/>, or in the middle of what's visible.</summary>
+    public void AddImage(PageHit? at = null)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Add an image",
+            Filter = ImageFilter,
+        };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+        var target = at ?? View.HitTest(new Point(View.ActualWidth / 2, View.ActualHeight / 2), nearest: true);
+        var page = target?.PageIndex ?? View.CurrentPageIndex;
+        var size = Document.PageSizes[page];
+        AddImageAt(page, target?.Display ?? new Point(size.Width / 2, size.Height / 2), dialog.FileName);
+    }
+
+    public void AddImageAt(int page, Point display, string path)
+    {
+        CommitStamps();
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            var rect = Document.AddImage(page, path, display);
+            Mouse.OverrideCursor = null;
+            if (!Edits.IsActive) EditModeRequested?.Invoke(this, EventArgs.Empty);
+            Edits.SelectImage(page, rect);
+            ShowToast("Image added   ·   drag to move it, drag a corner to resize");
+        }
+        catch (Exception ex)
+        {
+            Mouse.OverrideCursor = null;
+            Dialogs.Error(OwnerWindow, "Couldn't add the image", ex.Message);
+        }
+    }
+
+    private static string? DroppedImage(DragEventArgs e) =>
+        e.Data.GetData(DataFormats.FileDrop) is string[] files
+            ? files.FirstOrDefault(f => ImageExtensions.Contains(System.IO.Path.GetExtension(f).ToLowerInvariant()) && File.Exists(f))
+            : null;
+
+    private void OnViewerDragOver(object sender, DragEventArgs e)
+    {
+        if (DroppedImage(e) == null) return;
+        e.Effects = DragDropEffects.Copy;
+        e.Handled = true;
+    }
+
+    private void OnViewerDrop(object sender, DragEventArgs e)
+    {
+        if (DroppedImage(e) is not { } file) return;
+        e.Handled = true;
+        if (View.HitTest(e.GetPosition(View), nearest: true) is { } hit) AddImageAt(hit.PageIndex, hit.Display, file);
+    }
+
     // ---------------------------------------------------------------- security & export
 
     /// <summary>Raised when an action (like setting a password) should be saved right away.</summary>
@@ -862,6 +950,24 @@ public partial class DocumentView : UserControl, IDisposable
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         var typing = Keyboard.FocusedElement is TextBox or PasswordBox;
+        if (Edits.IsActive && !typing && Edits.Selected is { } selected)
+        {
+            switch (e.Key)
+            {
+                case Key.Delete or Key.Back:
+                    Edits.DeleteSelected();
+                    e.Handled = true;
+                    return;
+                case Key.Enter or Key.F2 when selected.IsText:
+                    Edits.EditSelected();
+                    e.Handled = true;
+                    return;
+                case Key.Escape:
+                    Edits.ClearSelection();
+                    e.Handled = true;
+                    return;
+            }
+        }
         if (e.Key == Key.Delete && !typing && Annotations.Selected != null)
         {
             Annotations.DeleteSelected();
@@ -898,6 +1004,12 @@ public partial class DocumentView : UserControl, IDisposable
 
     public void Undo()
     {
+        if (Edits.IsEditingText)
+        {
+            Edits.CancelEditor();
+            RaiseStatus();
+            return;
+        }
         if (Stamps.HasLive)
         {
             Stamps.Cancel();

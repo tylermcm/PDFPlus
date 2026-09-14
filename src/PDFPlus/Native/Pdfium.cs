@@ -205,6 +205,40 @@ internal static unsafe class Pdfium
     [DllImport(Lib)] public static extern uint FPDFAnnot_GetStringValue(IntPtr annot, [MarshalAs(UnmanagedType.LPStr)] string key, ushort* buffer, uint bufLen);
     [DllImport(Lib)] public static extern int FPDFAnnot_SetFlags(IntPtr annot, int flags);
     [DllImport(Lib)] public static extern IntPtr FPDFAnnot_GetLinkedAnnot(IntPtr annot, [MarshalAs(UnmanagedType.LPStr)] string key);
+
+    // fpdf_edit.h / fpdf_transformpage.h: editing existing page objects
+    public const int FPDF_PAGEOBJ_TEXT = 1;
+    public const int FPDF_TEXTRENDERMODE_FILL = 0, FPDF_TEXTRENDERMODE_INVISIBLE = 3, FPDF_TEXTRENDERMODE_CLIP = 7;
+    [DllImport(Lib)] public static extern int FPDFPage_InsertObjectAtIndex(IntPtr page, IntPtr pageObject, nuint index);
+    [DllImport(Lib)] public static extern int FPDFPage_RemoveObject(IntPtr page, IntPtr pageObject);
+    [DllImport(Lib)] public static extern int FPDFPageObj_GetMatrix(IntPtr pageObject, FS_MATRIX* matrix);
+    [DllImport(Lib)] public static extern int FPDFPageObj_SetMatrix(IntPtr pageObject, FS_MATRIX* matrix);
+    [DllImport(Lib)] public static extern int FPDFPageObj_GetBounds(IntPtr pageObject, float* left, float* bottom, float* right, float* top);
+    [DllImport(Lib)] public static extern int FPDFPageObj_GetRotatedBounds(IntPtr pageObject, FS_QUADPOINTSF* quadPoints);
+    [DllImport(Lib)] public static extern int FPDFPageObj_GetFillColor(IntPtr pageObject, uint* r, uint* g, uint* b, uint* a);
+    [DllImport(Lib)] public static extern IntPtr FPDFPageObj_GetClipPath(IntPtr pageObject);
+    [DllImport(Lib)] public static extern void FPDFPageObj_TransformClipPath(IntPtr pageObject, double a, double b, double c, double d, double e, double f);
+    [DllImport(Lib)] public static extern IntPtr FPDFPageObj_NewImageObj(IntPtr document);
+    [DllImport(Lib)] public static extern int FPDFImageObj_SetBitmap(IntPtr* pages, int count, IntPtr imageObject, IntPtr bitmap);
+    [DllImport(Lib)] public static extern uint FPDFTextObj_GetText(IntPtr textObject, IntPtr textPage, ushort* buffer, uint length);
+    [DllImport(Lib)] public static extern IntPtr FPDFTextObj_GetFont(IntPtr textObject);
+    [DllImport(Lib)] public static extern int FPDFTextObj_GetFontSize(IntPtr textObject, float* size);
+    [DllImport(Lib)] public static extern int FPDFTextObj_GetTextRenderMode(IntPtr textObject);
+    [DllImport(Lib)] public static extern int FPDFTextObj_SetTextRenderMode(IntPtr textObject, int renderMode);
+    [DllImport(Lib)] public static extern nuint FPDFFont_GetBaseFontName(IntPtr font, byte* buffer, nuint length);
+    [DllImport(Lib)] public static extern nuint FPDFFont_GetFamilyName(IntPtr font, byte* buffer, nuint length);
+    [DllImport(Lib)] public static extern int FPDFFont_GetFlags(IntPtr font);
+    [DllImport(Lib)] public static extern int FPDFFont_GetWeight(IntPtr font);
+    [DllImport(Lib)] public static extern int FPDFFont_GetItalicAngle(IntPtr font, int* angle);
+    [DllImport(Lib)] public static extern int FPDFFont_GetIsEmbedded(IntPtr font);
+    [DllImport(Lib)] public static extern IntPtr FPDFFont_GetGlyphPath(IntPtr font, uint glyph, float fontSize);
+    [DllImport(Lib)] public static extern int FPDFGlyphPath_CountGlyphSegments(IntPtr glyphPath);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct FS_MATRIX
+{
+    public float a, b, c, d, e, f;
 }
 
 [StructLayout(LayoutKind.Sequential)]

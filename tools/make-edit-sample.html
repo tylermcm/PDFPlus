@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  Source for tests/edit-sample.pdf: a "real world" PDF with embedded subset fonts, a bitmap image and a table,
+  printed by Edge (Skia), which is how most browser-made PDFs look inside.
+
+  "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --headless=new --no-pdf-header-footer
+      --print-to-pdf=tests\edit-sample.pdf file:///<repo>/tools/make-edit-sample.html
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Edit sample</title>
+<style>
+  @page { size: Letter; margin: 0.75in; }
+  body { font-family: Calibri, sans-serif; font-size: 12pt; color: #222; margin: 0; }
+  h1 { font-family: Cambria, serif; font-size: 26pt; margin: 0 0 4pt; color: #1F3864; }
+  .meta { font-family: Arial, sans-serif; font-size: 10pt; color: #666; margin: 0 0 14pt; }
+  p { margin: 0 0 10pt; }
+  table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 10.5pt; margin: 14pt 0; }
+  td, th { border: 1px solid #999; padding: 4pt 12pt; text-align: left; }
+  th { background: #DCE6F2; }
+  code { font-family: "Courier New", monospace; font-size: 11pt; }
+  .due { color: #C00000; }
+  .draft { position: absolute; right: 0; top: 3.2in; transform: rotate(-90deg); transform-origin: right top; font-size: 9pt; color: #999; }
+</style>
+</head>
+<body>
+  <h1>Quarterly Report</h1>
+  <p class="meta">Prepared by the Finance Team, March 2026</p>
+  <p>Revenue grew to <b>$4.2 million</b> this quarter, driven by strong demand in the northern region.</p>
+  <p>Invoice number: INV-10442</p>
+  <canvas id="chart" width="480" height="200"></canvas>
+  <table>
+    <tr><th>Region</th><th>Sales</th></tr>
+    <tr><td>North</td><td>1,240</td></tr>
+    <tr><td>South</td><td>980</td></tr>
+  </table>
+  <p><code>Reference code: ABC-123</code></p>
+  <p class="due">Payment is due within 30 days.</p>
+  <div class="draft">Draft copy</div>
+  <script>
+    const ctx = document.getElementById("chart").getContext("2d");
+    const gradient = ctx.createLinearGradient(0, 0, 480, 200);
+    gradient.addColorStop(0, "#EAF1FB");
+    gradient.addColorStop(1, "#C9D9F0");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 480, 200);
+    [["#2F80ED", 120], ["#3DDC84", 160], ["#FFB020", 90], ["#E53935", 140]].forEach(([color, h], i) => {
+      ctx.fillStyle = color;
+      ctx.fillRect(40 + i * 110, 190 - h, 70, h);
+    });
+  </script>
+</body>
+</html>

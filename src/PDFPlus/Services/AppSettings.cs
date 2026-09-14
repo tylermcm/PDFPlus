@@ -11,6 +11,15 @@ public sealed class SavedSignature
     public double Height { get; set; }
 }
 
+/// <summary>What the Home screen remembers about a recent file.</summary>
+public sealed class RecentInfo
+{
+    public DateTime Opened { get; set; }
+    /// <summary>Zero-based page the file was left on.</summary>
+    public int Page { get; set; }
+    public bool Pinned { get; set; }
+}
+
 /// <summary>
 /// Settings live in %APPDATA%\PDFPlus by default. For a fully portable setup, put an (even empty)
 /// PDFPlus.settings.json next to the exe and settings will be kept there instead.
@@ -26,6 +35,10 @@ public sealed class AppSettings
     public string Theme { get; set; } = "System";
     public bool SidebarVisible { get; set; } = true;
     public List<string> RecentFiles { get; set; } = new();
+    /// <summary>Keyed by lower-case path.</summary>
+    public Dictionary<string, RecentInfo> RecentDetails { get; set; } = new();
+    /// <summary>"Grid" or "List" layout for recent files on Home.</summary>
+    public string HomeLayout { get; set; } = "Grid";
     public List<SavedSignature> Signatures { get; set; } = new();
     public double TextSize { get; set; } = 11;
     public string InkColor { get; set; } = "#000000";
@@ -69,11 +82,57 @@ public sealed class AppSettings
         }
     }
 
+    private const int MaxRecent = 30;
+
+    private static string Key(string path) => path.ToLowerInvariant();
+
+    public RecentInfo? DetailsFor(string path) => RecentDetails.GetValueOrDefault(Key(path));
+
     public void AddRecent(string path)
     {
         RecentFiles.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
         RecentFiles.Insert(0, path);
-        if (RecentFiles.Count > 15) RecentFiles.RemoveRange(15, RecentFiles.Count - 15);
+        var info = DetailsFor(path) ?? new RecentInfo();
+        info.Opened = DateTime.Now;
+        RecentDetails[Key(path)] = info;
+
+        // Pinned files never fall off the list; the rest keep the newest MaxRecent.
+        var unpinned = 0;
+        for (var i = 0; i < RecentFiles.Count; i++)
+        {
+            if (DetailsFor(RecentFiles[i])?.Pinned == true || ++unpinned <= MaxRecent) continue;
+            RecentDetails.Remove(Key(RecentFiles[i]));
+            RecentFiles.RemoveAt(i--);
+        }
         Save();
+    }
+
+    public void SetPinned(string path, bool pinned)
+    {
+        if (!RecentFiles.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase))) RecentFiles.Add(path);
+        var info = DetailsFor(path) ?? new RecentInfo();
+        info.Pinned = pinned;
+        RecentDetails[Key(path)] = info;
+        Save();
+    }
+
+    public void RemoveRecent(string path)
+    {
+        RecentFiles.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+        RecentDetails.Remove(Key(path));
+        Save();
+    }
+
+    /// <summary>Forgets every recent file that isn't pinned.</summary>
+    public void ClearRecent()
+    {
+        foreach (var path in RecentFiles.Where(p => DetailsFor(p)?.Pinned != true).ToList()) RemoveRecent(path);
+        Save();
+    }
+
+    /// <summary>Remembers the page a file was left on; written with the next save.</summary>
+    public void RememberPage(string path, int page)
+    {
+        if (DetailsFor(path) is { } info) info.Page = Math.Max(0, page);
     }
 }

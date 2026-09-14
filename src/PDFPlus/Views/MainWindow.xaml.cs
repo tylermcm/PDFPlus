@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using PDFPlus.Controls;
 using PDFPlus.Core;
@@ -50,12 +51,6 @@ public sealed class DocumentTab : INotifyPropertyChanged
     private void OnChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
-public sealed record RecentItem(string FullPath)
-{
-    public string Name => Path.GetFileName(FullPath);
-    public string Folder => Path.GetDirectoryName(FullPath) ?? "";
-}
-
 public partial class MainWindow : Window
 {
     private readonly ObservableCollection<DocumentTab> _tabs = new();
@@ -67,7 +62,16 @@ public partial class MainWindow : Window
         InitializeComponent();
         TabStrip.ItemsSource = _tabs;
         LogoImage.Source = AppIcon.Get(32);
-        WelcomeLogo.Source = AppIcon.Get(128);
+        Home.OpenRequested += async (_, path) =>
+        {
+            if (path == null) await OpenWithDialogAsync();
+            else await OpenFileAsync(path);
+        };
+        Home.ToolRequested += (_, request) => RunHomeTool(request);
+        Home.CombineRequested += (_, _) => CombineFiles();
+        Home.ImagesToPdfRequested += (_, files) => CreatePdfFromImages(files);
+        Home.AboutRequested += (_, _) => ShowAbout();
+        Home.ShortcutsRequested += (_, _) => ShowShortcuts();
         Icon = AppIcon.Get(256);
 
         var settings = AppSettings.Current;
@@ -122,7 +126,8 @@ public partial class MainWindow : Window
     private void UpdateChrome()
     {
         var tab = _active;
-        WelcomePanel.Visibility = tab == null ? Visibility.Visible : Visibility.Collapsed;
+        Home.Visibility = tab == null ? Visibility.Visible : Visibility.Collapsed;
+        HomeButton.IsChecked = tab == null;
         Toolbar.Visibility = tab == null ? Visibility.Collapsed : Visibility.Visible;
         Title = tab == null ? "PDFPlus" : $"{tab.Title} - PDFPlus";
         if (tab == null) return;
@@ -148,14 +153,16 @@ public partial class MainWindow : Window
         SignButton.IsChecked = armed == StampKind.Signature;
 
         var annotationTool = view.AnnotationTool;
-        if (annotationTool != AnnotationTool.None)
+        if (annotationTool != AnnotationTool.None || _toolMode == ToolMode.Edit)
         {
             SelectToolButton.IsChecked = false;
             HandToolButton.IsChecked = false;
         }
+        EditModeButton.IsChecked = _toolMode == ToolMode.Edit;
         AnnotateModeButton.IsChecked = _toolMode == ToolMode.Annotate;
         FillSignModeButton.IsChecked = _toolMode == ToolMode.FillSign;
         ToolRow.Visibility = _toolMode == ToolMode.None ? Visibility.Collapsed : Visibility.Visible;
+        EditRow.Visibility = _toolMode == ToolMode.Edit ? Visibility.Visible : Visibility.Collapsed;
         AnnotateRow.Visibility = _toolMode == ToolMode.Annotate ? Visibility.Visible : Visibility.Collapsed;
         FillSignRow.Visibility = _toolMode == ToolMode.FillSign ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in AnnotateRow.Children.OfType<ToggleButton>())
@@ -176,6 +183,10 @@ public partial class MainWindow : Window
             tab.Refresh();
             if (_active == tab) UpdateChrome();
         };
+        view.EditModeRequested += (_, _) =>
+        {
+            if (_active == tab) SetToolMode(ToolMode.Edit);
+        };
         view.SaveRequested += (_, _) =>
         {
             if (Save(tab, saveAs: false))
@@ -193,7 +204,9 @@ public partial class MainWindow : Window
         {
             if (_active != null)
             {
+                RememberPage(_active);
                 _active.View.CommitStamps();
+                _active.View.SetEditMode(false);
                 _active.IsActive = false;
                 _active.View.Visibility = Visibility.Collapsed;
             }
@@ -202,6 +215,7 @@ public partial class MainWindow : Window
             {
                 tab.IsActive = true;
                 tab.View.Visibility = Visibility.Visible;
+                tab.View.SetEditMode(_toolMode == ToolMode.Edit);
                 tab.View.FocusViewer();
                 Dispatcher.BeginInvoke(() =>
                 {
@@ -236,6 +250,8 @@ public partial class MainWindow : Window
     private bool CloseTab(DocumentTab tab)
     {
         if (!ConfirmDiscard(tab)) return false;
+        RememberPage(tab);
+        AppSettings.Current.Save();
         var index = _tabs.IndexOf(tab);
         _tabs.Remove(tab);
         DocumentHost.Children.Remove(tab.View);
@@ -319,6 +335,7 @@ public partial class MainWindow : Window
                 AddTab(document);
                 AppSettings.Current.AddRecent(fullPath);
                 RefreshRecent();
+                ResumeAtLastPage(fullPath);
                 return;
             }
             catch (PdfPasswordRequiredException ex)
@@ -332,8 +349,8 @@ public partial class MainWindow : Window
                 Mouse.OverrideCursor = null;
                 if (ex is FileNotFoundException or DirectoryNotFoundException)
                 {
-                    AppSettings.Current.RecentFiles.RemoveAll(p => string.Equals(p, fullPath, StringComparison.OrdinalIgnoreCase));
-                    AppSettings.Current.Save();
+                    // Pinned files stay listed: they may be on a drive that just isn't connected right now.
+                    if (AppSettings.Current.DetailsFor(fullPath)?.Pinned != true) AppSettings.Current.RemoveRecent(fullPath);
                     RefreshRecent();
                 }
                 Dialogs.Error(this, $"Couldn't open {Path.GetFileName(fullPath)}", ex.Message);
@@ -397,6 +414,7 @@ public partial class MainWindow : Window
             }
         }
 
+        foreach (var tab in _tabs) RememberPage(tab);
         var settings = AppSettings.Current;
         settings.WindowMaximized = WindowState == WindowState.Maximized;
         var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
@@ -442,14 +460,101 @@ public partial class MainWindow : Window
 
     private void RefreshRecent()
     {
-        var items = AppSettings.Current.RecentFiles.Take(8).Select(p => new RecentItem(p)).ToList();
-        RecentList.ItemsSource = items;
-        RecentHeader.Visibility = items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (Home.IsVisible) Home.Refresh();
     }
 
-    private void OnRecentClick(object sender, RoutedEventArgs e)
+    // ---------------------------------------------------------------- home
+
+    internal void ShowHome() => SelectTab(null);
+
+    private void OnHomeClick(object sender, RoutedEventArgs e) => ShowHome();
+
+    private static void RememberPage(DocumentTab tab)
     {
-        if ((sender as FrameworkElement)?.Tag is string path) _ = OpenFileAsync(path);
+        if (tab.Document.FilePath is { } path) AppSettings.Current.RememberPage(path, tab.View.Viewer.CurrentPageIndex);
+    }
+
+    private void ResumeAtLastPage(string path)
+    {
+        var page = AppSettings.Current.DetailsFor(path)?.Page ?? 0;
+        if (page <= 0 || ActiveView is not { } view || page >= view.Document.PageCount) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            view.Viewer.GoToPage(page);
+            view.ShowToast($"Opened at page {page + 1}, where you left off");
+        }, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Runs a Home tool: asks for a PDF (unless one was picked from Recent), opens it and starts the tool.</summary>
+    private async void RunHomeTool(HomeToolRequest request)
+    {
+        switch (request.Tool)
+        {
+            case HomeTool.Combine:
+                CombineFiles();
+                return;
+            case HomeTool.ImagesToPdf:
+                CreatePdfFromImages([]);
+                return;
+        }
+
+        var path = request.Path;
+        if (path == null)
+        {
+            var title = HomeView.Tools.First(t => t.Tool == request.Tool).Title;
+            var dialog = new OpenFileDialog { Filter = DocumentView.PdfFilter, Title = $"{title}: choose a PDF" };
+            if (dialog.ShowDialog(this) != true) return;
+            path = dialog.FileName;
+        }
+        await OpenFileAsync(path);
+        if (ActiveView is not { } view || !string.Equals(view.Document.FilePath, Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase)) return;
+
+        switch (request.Tool)
+        {
+            case HomeTool.Edit:
+                SetToolMode(ToolMode.Edit);
+                break;
+            case HomeTool.FillSign:
+                SetToolMode(ToolMode.FillSign);
+                break;
+            case HomeTool.Annotate:
+                SetToolMode(ToolMode.Annotate);
+                break;
+            case HomeTool.Organize:
+                view.SetSidebarVisible(true);
+                view.ShowToast("Drag thumbnails to reorder pages   ·   right-click a page for more");
+                break;
+            case HomeTool.Compress:
+                _ = Dispatcher.BeginInvoke(() => view.CompressCopy(), DispatcherPriority.Loaded);
+                break;
+            case HomeTool.Protect:
+                _ = Dispatcher.BeginInvoke(() => view.ProtectWithPassword(), DispatcherPriority.Loaded);
+                break;
+        }
+    }
+
+    private void CreatePdfFromImages(IReadOnlyList<string> files)
+    {
+        if (files.Count == 0)
+        {
+            var dialog = new OpenFileDialog { Title = "Choose pictures for the new PDF", Multiselect = true, Filter = DocumentView.ImageFilter };
+            if (dialog.ShowDialog(this) != true) return;
+            files = dialog.FileNames;
+        }
+        var ordered = files.OrderBy(Path.GetFileName, StringComparer.CurrentCultureIgnoreCase).ToList();
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            var document = PdfDocument.CreateFromImages(ordered);
+            Mouse.OverrideCursor = null;
+            AddTab(document);
+            ActiveView?.ShowToast($"Made a PDF from {ordered.Count} picture{(ordered.Count == 1 ? "" : "s")}   ·   Ctrl+S to save it");
+        }
+        catch (Exception ex)
+        {
+            Mouse.OverrideCursor = null;
+            Dialogs.Error(this, "Couldn't make the PDF", ex.Message);
+        }
     }
 
     private void OnWindowDragOver(object sender, DragEventArgs e)
@@ -525,6 +630,7 @@ public partial class MainWindow : Window
         else if ((modifiers == ModifierKeys.Control && e.Key == Key.Y) || (modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.Z)) view.Redo();
         else if (modifiers == ModifierKeys.None && e.Key == Key.V) SetTool(ViewTool.Select);
         else if (modifiers == ModifierKeys.None && e.Key == Key.H) SetTool(ViewTool.Hand);
+        else if (modifiers == ModifierKeys.None && e.Key == Key.E) SetToolMode(_toolMode == ToolMode.Edit ? ToolMode.None : ToolMode.Edit);
         else return;
 
         e.Handled = true;
@@ -536,6 +642,7 @@ public partial class MainWindow : Window
     private void SetTool(ViewTool tool)
     {
         if (ActiveView is not { } view) return;
+        if (_toolMode == ToolMode.Edit) SetToolMode(ToolMode.None);
         view.CommitStamps();
         view.SetAnnotationTool(AnnotationTool.None);
         view.Viewer.Tool = tool;
@@ -715,7 +822,7 @@ public partial class MainWindow : Window
 
     // ---------------------------------------------------------------- annotate / fill & sign modes
 
-    internal enum ToolMode { None, Annotate, FillSign }
+    internal enum ToolMode { None, Annotate, FillSign, Edit }
 
     private static readonly string[] AnnotationPalette = ["#FFD400", "#3DDC84", "#2F80ED", "#FF4FA3", "#E53935", "#1C1D22"];
     private ToolMode _toolMode;
@@ -725,6 +832,11 @@ public partial class MainWindow : Window
 
     private void OnFillSignModeClick(object sender, RoutedEventArgs e) =>
         SetToolMode(_toolMode == ToolMode.FillSign ? ToolMode.None : ToolMode.FillSign);
+
+    private void OnEditModeClick(object sender, RoutedEventArgs e) =>
+        SetToolMode(_toolMode == ToolMode.Edit ? ToolMode.None : ToolMode.Edit);
+
+    private void OnAddImageClick(object sender, RoutedEventArgs e) => ActiveView?.AddImage();
 
     internal void SetToolMode(ToolMode mode)
     {
@@ -737,6 +849,7 @@ public partial class MainWindow : Window
                 view.CommitStamps();
                 view.Disarm();
             }
+            view.SetEditMode(mode == ToolMode.Edit);
         }
         UpdateChrome();
     }
@@ -854,6 +967,7 @@ public partial class MainWindow : Window
     {
         var menu = new ContextMenu { PlacementTarget = MoreButton, Placement = PlacementMode.Bottom };
         menu.Items.Add(DocumentView.MenuItemFor("Open…", "", () => _ = OpenWithDialogAsync(), "Ctrl+O"));
+        menu.Items.Add(DocumentView.MenuItemFor("New PDF from images…", "\uEB9F", () => CreatePdfFromImages([])));
         if (_active != null)
         {
             var tab = _active;
@@ -891,16 +1005,5 @@ public partial class MainWindow : Window
         "PDF rendering by PDFium, the engine behind Chrome's PDF viewer (BSD-3-Clause license).",
         "About PDFPlus");
 
-    private void ShowShortcuts() => Dialogs.Info(this, "Keyboard shortcuts",
-        "Ctrl+O  Open        Ctrl+S  Save        Ctrl+Shift+S  Save as\n" +
-        "Ctrl+W  Close tab   Ctrl+Tab  Next tab  Ctrl+P  Print\n" +
-        "Ctrl+F  Find        F3 / Shift+F3  Next / previous match\n" +
-        "Ctrl+Z  Undo        Ctrl+Y  Redo\n" +
-        "Ctrl + / Ctrl -  Zoom      Ctrl+wheel  Zoom at cursor\n" +
-        "Ctrl+0  Fit page    Ctrl+1  Actual size    Ctrl+2  Fit width\n" +
-        "F4  Sidebar         V  Select tool         H  Hand tool\n" +
-        "Home / End  First / last page    Space  Page down\n" +
-        "Del (in sidebar)  Delete pages   Drag thumbnails to reorder\n" +
-        "Esc  Finish placing text or signature",
-        "Keyboard shortcuts");
+    private void ShowShortcuts() => ShortcutsDialog.Show(this);
 }
