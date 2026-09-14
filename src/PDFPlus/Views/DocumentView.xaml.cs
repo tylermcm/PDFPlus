@@ -129,6 +129,7 @@ public partial class DocumentView : UserControl, IDisposable
         View.ZoomChanged += (_, _) => RaiseStatus();
         View.LinkActivated += (_, target) => Navigate(target);
         View.PlacementRequested += OnPlacementRequested;
+        View.MouseRightButtonUp += OnViewRightClick;
         View.PreviewMouseDown += (_, _) =>
         {
             if (View.PlacementMode) return;
@@ -485,6 +486,154 @@ public partial class DocumentView : UserControl, IDisposable
         var item = new MenuItem { Header = header, Icon = icon, InputGestureText = gesture ?? "", IsChecked = isChecked };
         item.Click += (_, _) => action();
         return item;
+    }
+
+    // ---------------------------------------------------------------- right-click menu
+
+    private void OnViewRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (View.PlacementMode || Annotations.Tool != AnnotationTool.None) return;
+        e.Handled = true;
+        var menu = BuildViewContextMenu(e.GetPosition(View));
+        menu.PlacementTarget = View;
+        menu.Placement = PlacementMode.MousePoint;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>Builds the page context menu for a point in viewer coordinates, based on what's under it.</summary>
+    internal ContextMenu BuildViewContextMenu(Point viewPosition)
+    {
+        Stamps.Commit();
+        var menu = new ContextMenu();
+
+        void Add(string header, string? icon, Action action, string? gesture = null, bool enabled = true)
+        {
+            var item = MenuItemFor(header, icon, action, gesture);
+            item.IsEnabled = enabled;
+            menu.Items.Add(item);
+        }
+
+        void AddSeparator()
+        {
+            if (menu.Items.Count > 0 && menu.Items[menu.Items.Count - 1] is not Separator) menu.Items.Add(new Separator());
+        }
+
+        if (Document.HasFormFocus)
+        {
+            var hasFieldSelection = Document.FormSelectedText().Length > 0;
+            Add("Cut", "", () => { if (View.CopySelection()) Document.FormReplaceSelection(""); }, "Ctrl+X", hasFieldSelection);
+            Add("Copy", "", () => View.CopySelection(), "Ctrl+C", hasFieldSelection);
+            Add("Paste", "", PasteIntoFormField, "Ctrl+V", ClipboardHasText());
+            AddSeparator();
+            Add("Select all", "", () => Document.FormSelectAll(), "Ctrl+A");
+            return menu;
+        }
+
+        var hit = View.HitTest(viewPosition);
+        if (hit is { } target)
+        {
+            if (Annotations.TrySelectAt(target, 1) && Annotations.Selected is { } annotation)
+            {
+                if (annotation.IsNote) Add("Edit note", "", Annotations.EditSelectedNote);
+                Add("Delete annotation", "", Annotations.DeleteSelected, "Del");
+                AddSeparator();
+            }
+            else if (Document.LinkAt(target.PageIndex, View.DisplayToPage(target.PageIndex, target.Display)) is { } link)
+            {
+                if (link.Uri is { } uri)
+                {
+                    Add("Open link", "", () => Navigate(link));
+                    Add("Copy link address", "", () => CopyToClipboard(uri));
+                }
+                else
+                {
+                    Add($"Go to page {link.PageIndex + 1}", "", () => Navigate(link));
+                }
+                AddSeparator();
+            }
+        }
+
+        var hasSelection = View.HasSelection;
+        Add("Copy", "", () => View.CopySelection(), "Ctrl+C", hasSelection);
+        if (hasSelection)
+        {
+            Add("Highlight", "", () => MarkupSelection(MarkupKind.Highlight));
+            Add("Underline", "", () => MarkupSelection(MarkupKind.Underline));
+            Add("Strike out", null, () => MarkupSelection(MarkupKind.Strikeout));
+            var text = View.SelectedText().Trim();
+            if (text.Length is > 0 and <= 40 && !text.Contains('\n'))
+                Add($"Find “{text}”", "", () => { ShowSearch(); FindNext(false); });
+        }
+        if (hit is { } selectTarget)
+            Add("Select all text on page", "", () => View.SelectAllOnPage(selectTarget.PageIndex), "Ctrl+A");
+
+        AddSeparator();
+        Add("Zoom in", "", View.ZoomIn, "Ctrl++");
+        Add("Zoom out", "", View.ZoomOut, "Ctrl+-");
+        Add("Fit width", "", () => { View.FitMode = FitMode.Width; RaiseStatus(); }, "Ctrl+2");
+        Add("Fit page", "", () => { View.FitMode = FitMode.Page; RaiseStatus(); }, "Ctrl+0");
+
+        if (hit is { } rotateTarget)
+        {
+            AddSeparator();
+            Add("Rotate page right", "", () => Document.RotatePages([rotateTarget.PageIndex], 1));
+            Add("Rotate page left", "", () => Document.RotatePages([rotateTarget.PageIndex], -1));
+        }
+        return menu;
+    }
+
+    private void MarkupSelection(MarkupKind kind)
+    {
+        Color color;
+        try
+        {
+            color = (Color)ColorConverter.ConvertFromString(AppSettings.Current.AnnotationColor);
+        }
+        catch
+        {
+            color = Color.FromRgb(0xFF, 0xD4, 0x00);
+        }
+        // A black highlight would hide the text, so fall back to yellow.
+        if (kind == MarkupKind.Highlight && color.R + color.G + color.B < 150) color = Color.FromRgb(0xFF, 0xD4, 0x00);
+
+        foreach (var (page, rects) in View.SelectionTextRects()) Document.AddTextMarkup(page, kind, rects, color);
+        View.ClearSelection();
+    }
+
+    private void PasteIntoFormField()
+    {
+        try
+        {
+            if (Clipboard.ContainsText()) Document.FormReplaceSelection(Clipboard.GetText());
+        }
+        catch
+        {
+            // Clipboard can be locked by another app; ignore.
+        }
+    }
+
+    private static bool ClipboardHasText()
+    {
+        try
+        {
+            return Clipboard.ContainsText();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void CopyToClipboard(string text)
+    {
+        try
+        {
+            Clipboard.SetText(text);
+        }
+        catch
+        {
+            // Clipboard can be locked by another app; ignore.
+        }
     }
 
     // ---------------------------------------------------------------- navigation

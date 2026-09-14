@@ -292,6 +292,20 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
         return rects;
     }
 
+    /// <summary>The current text selection as PDF-space rectangles, grouped by page.</summary>
+    public List<(int Page, Rect[] Rects)> SelectionTextRects()
+    {
+        var result = new List<(int Page, Rect[] Rects)>();
+        if (!HasSelection || _document == null) return result;
+        var (start, end) = OrderedSelection();
+        for (var page = start.Page; page <= end.Page; page++)
+        {
+            var rects = SelectionRects(page);
+            if (rects.Length > 0) result.Add((page, rects));
+        }
+        return result;
+    }
+
     public string SelectedText()
     {
         if (_document == null) return "";

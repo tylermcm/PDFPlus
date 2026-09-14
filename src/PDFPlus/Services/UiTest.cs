@@ -134,6 +134,27 @@ internal static class UiTest
             await Settle(400);
             Snap(window, "14-fill-sign-row");
 
+            // Right-click menu with a text selection, rendered off-screen.
+            window.SetToolMode(MainWindow.ToolMode.None);
+            view.Viewer.SelectAllOnPage(0);
+            var menu = view.BuildViewContextMenu(new Point(500, 400));
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Absolute;
+            menu.HorizontalOffset = -30000;
+            menu.IsOpen = true;
+            await Settle(600);
+            try
+            {
+                SaveElement(menu, Path.Combine(outputDirectory, "15-context-menu.png"));
+                log.AppendLine("saved 15-context-menu.png");
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine($"FAIL snapshot context menu: {ex.Message}");
+            }
+            menu.IsOpen = false;
+            view.Viewer.ClearSelection();
+
             // Leave the document clean so closing the window does not prompt.
             doc.Save(Path.Combine(outputDirectory, "uitest-result.pdf"));
             log.AppendLine($"saved uitest-result.pdf, pages={doc.PageCount}");
@@ -162,6 +183,24 @@ internal static class UiTest
         var bounds = GeometryData.Bounds(figures);
         figures = GeometryData.Translate(figures, -bounds.X, -bounds.Y);
         return new SavedSignature { Data = GeometryData.ToMarkup(figures), Width = bounds.Width, Height = bounds.Height };
+    }
+
+    private static void SaveElement(FrameworkElement element, string path)
+    {
+        element.UpdateLayout();
+        var dpi = VisualTreeHelper.GetDpi(element);
+        var bitmap = new RenderTargetBitmap(
+            (int)Math.Ceiling(element.ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(element.ActualHeight * dpi.DpiScaleY),
+            dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        var background = new DrawingVisual();
+        using (var dc = background.RenderOpen())
+            dc.DrawRectangle(Application.Current.TryFindResource("Brush.Canvas") as Brush, null, new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+        bitmap.Render(background);
+        bitmap.Render(element);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = File.Create(path);
+        encoder.Save(stream);
     }
 
     private static void SaveWindow(Window window, string path)
