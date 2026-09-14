@@ -824,16 +824,29 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
         CaptureMouse();
     }
 
+    /// <summary>
+    /// Called for a left click on a page (not on a form field) before links and text selection.
+    /// Arguments are the hit and the click count; return true to consume the click.
+    /// </summary>
+    public Func<PageHit, int, bool>? PreviewPageClick { get; set; }
+
+    /// <summary>Wheel handling shared with overlays: Ctrl zooms at the pointer, Shift scrolls sideways.</summary>
+    public void ScrollByWheel(int delta, Point position)
+    {
+        if (_document == null) return;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+            SetZoom(_zoom * Math.Pow(1.0015, delta), position);
+        else if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+            SetHorizontalOffset(_offset.X - delta * 0.5);
+        else
+            SetVerticalOffset(_offset.Y - delta * 0.5);
+    }
+
     protected override void OnPreviewMouseWheel(MouseWheelEventArgs e)
     {
         base.OnPreviewMouseWheel(e);
         if (_document == null) return;
-        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
-            SetZoom(_zoom * Math.Pow(1.0015, e.Delta), e.GetPosition(this));
-        else if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
-            SetHorizontalOffset(_offset.X - e.Delta * 0.5);
-        else
-            SetVerticalOffset(_offset.Y - e.Delta * 0.5);
+        ScrollByWheel(e.Delta, e.GetPosition(this));
         e.Handled = true;
     }
 
@@ -882,6 +895,13 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
             return;
         }
         if (_document.HasFormFocus) _document.FormKillFocus();
+
+        if (PreviewPageClick?.Invoke(h, e.ClickCount) == true)
+        {
+            ClearSelection();
+            e.Handled = true;
+            return;
+        }
 
         if (_document.LinkAt(h.PageIndex, pagePoint) is { } link)
         {

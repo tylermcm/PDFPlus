@@ -31,7 +31,7 @@ internal static unsafe class PdfLibrary
         }
     }
 
-    public static void Save(IntPtr document, Stream output)
+    public static void Save(IntPtr document, Stream output, uint flags = 0)
     {
         lock (Sync)
         {
@@ -39,7 +39,7 @@ internal static unsafe class PdfLibrary
             _sink = output;
             try
             {
-                if (FPDF_SaveAsCopy(document, &writer, 0) == 0)
+                if (FPDF_SaveAsCopy(document, &writer, flags) == 0)
                     throw new IOException("The PDF engine could not write this document.");
             }
             finally
@@ -49,10 +49,10 @@ internal static unsafe class PdfLibrary
         }
     }
 
-    public static byte[] SaveToBytes(IntPtr document)
+    public static byte[] SaveToBytes(IntPtr document, uint flags = 0)
     {
         using var stream = new MemoryStream();
-        Save(document, stream);
+        Save(document, stream, flags);
         return stream.ToArray();
     }
 

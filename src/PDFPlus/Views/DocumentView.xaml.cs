@@ -106,6 +106,9 @@ public partial class DocumentView : UserControl, IDisposable
         Document = document;
         View.Document = document;
         Stamps.Attach(View, document);
+        Annotations.Attach(View, document);
+        Annotations.SelectionChanged += (_, _) => RaiseStatus();
+        View.PreviewPageClick = (hit, clicks) => Annotations.TrySelectAt(hit, clicks);
 
         _thumbTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _thumbTimer.Tick += (_, _) => FlushThumbnails();
@@ -128,7 +131,9 @@ public partial class DocumentView : UserControl, IDisposable
         View.PlacementRequested += OnPlacementRequested;
         View.PreviewMouseDown += (_, _) =>
         {
-            if (!View.PlacementMode) Stamps.Commit();
+            if (View.PlacementMode) return;
+            Stamps.Commit();
+            Annotations.ClearSelection();
         };
 
         PreviewKeyDown += OnPreviewKeyDown;
@@ -524,9 +529,153 @@ public partial class DocumentView : UserControl, IDisposable
 
     // ---------------------------------------------------------------- fill & sign
 
+    // ---------------------------------------------------------------- annotations
+
+    public AnnotationTool AnnotationTool => Annotations.Tool;
+    public bool HasSelectedAnnotation => Annotations.Selected != null;
+
+    public Color AnnotationColor
+    {
+        get => Annotations.Color;
+        set => Annotations.Color = value;
+    }
+
+    public double AnnotationWidth
+    {
+        get => Annotations.StrokeWidth;
+        set => Annotations.StrokeWidth = value;
+    }
+
+    public void SetAnnotationTool(AnnotationTool tool)
+    {
+        Stamps.Commit();
+        Disarm();
+        View.ClearSelection();
+        Annotations.Tool = tool;
+        FocusViewer();
+        RaiseStatus();
+    }
+
+    public void DeleteSelectedAnnotation() => Annotations.DeleteSelected();
+
+    // ---------------------------------------------------------------- security & export
+
+    /// <summary>Raised when an action (like setting a password) should be saved right away.</summary>
+    public event EventHandler? SaveRequested;
+
+    public void ProtectWithPassword()
+    {
+        var protection = ToolsDialogs.Protect(OwnerWindow, Document.Title);
+        if (protection == null) return;
+        Stamps.Commit();
+        Document.SetProtection(protection);
+        SaveRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void RemovePassword()
+    {
+        if (!Document.IsProtected) return;
+        if (Dialogs.Ask(OwnerWindow, "Remove the password?",
+                "Anyone with the file will be able to open, print and copy it. This takes effect when you save.",
+                "Remove password", null) != AskResult.Primary)
+            return;
+        Stamps.Commit();
+        Document.ClearProtection();
+        SaveRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async void ExportImages()
+    {
+        Stamps.Commit();
+        var owner = OwnerWindow;
+        var options = ToolsDialogs.ExportImages(owner, Document.PageCount, SelectedPages());
+        if (options == null) return;
+        var folder = new OpenFolderDialog { Title = "Choose where to save the images" };
+        if (Document.FilePath != null) folder.InitialDirectory = System.IO.Path.GetDirectoryName(Document.FilePath);
+        if (folder.ShowDialog(owner) != true) return;
+
+        var extension = options.Format == ImageExportFormat.Png ? "png" : "jpg";
+        var digits = Document.PageCount.ToString().Length;
+        var doc = Document;
+        var baseName = BaseName;
+        try
+        {
+            ShowToast($"Exporting {options.Pages.Length} page{(options.Pages.Length == 1 ? "" : "s")}…");
+            await Task.Run(() =>
+            {
+                foreach (var page in options.Pages)
+                {
+                    var name = $"{baseName} - page {(page + 1).ToString().PadLeft(digits, '0')}.{extension}";
+                    doc.ExportPageImage(page, System.IO.Path.Combine(folder.FolderName, name), options.Dpi, options.Format);
+                }
+            });
+            ShowToast($"Saved {options.Pages.Length} image{(options.Pages.Length == 1 ? "" : "s")} to {System.IO.Path.GetFileName(folder.FolderName)}");
+        }
+        catch (Exception ex)
+        {
+            Dialogs.Error(owner, "Couldn't export images", ex.Message);
+        }
+    }
+
+    public async void CompressCopy()
+    {
+        Stamps.Commit();
+        var owner = OwnerWindow;
+        var preset = ToolsDialogs.Compress(owner);
+        if (preset == null) return;
+        var dialog = new SaveFileDialog
+        {
+            Filter = PdfFilter,
+            DefaultExt = ".pdf",
+            AddExtension = true,
+            FileName = $"{BaseName} (compressed).pdf",
+        };
+        if (Document.FilePath != null) dialog.InitialDirectory = System.IO.Path.GetDirectoryName(Document.FilePath);
+        if (dialog.ShowDialog(owner) != true) return;
+
+        var doc = Document;
+        var path = dialog.FileName;
+        var total = Math.Max(1, doc.PageCount);
+        try
+        {
+            Mouse.OverrideCursor = Cursors.AppStarting;
+            ShowToast("Compressing…");
+            var result = await Task.Run(() => doc.SaveCompressedCopy(path, preset.Dpi, preset.Quality, CancellationToken.None, page =>
+            {
+                if (page % 10 == 0) Dispatcher.BeginInvoke(() => ToastText.Text = $"Compressing… {page * 100 / total}%");
+            }));
+            Mouse.OverrideCursor = null;
+            if (result.Written)
+            {
+                var saved = 100 - result.CompressedBytes * 100 / Math.Max(1, result.OriginalBytes);
+                ShowToast($"Saved {System.IO.Path.GetFileName(path)}: {FormatBytes(result.OriginalBytes)} → {FormatBytes(result.CompressedBytes)} ({saved}% smaller)");
+            }
+            else
+            {
+                Dialogs.Info(owner, "This PDF is already compact",
+                    $"PDFPlus couldn't make it smaller than {FormatBytes(result.OriginalBytes)}, so no copy was written. Files without large images usually can't shrink much.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Mouse.OverrideCursor = null;
+            Dialogs.Error(owner, "Couldn't compress the PDF", ex.Message);
+        }
+    }
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.#} MB",
+        >= 1024 => $"{bytes / 1024.0:0} KB",
+        _ => $"{bytes} bytes",
+    };
+
+    // ---------------------------------------------------------------- fill & sign
+
     public void ArmStamp(StampKind kind, SavedSignature? signature = null)
     {
         Stamps.Commit();
+        Annotations.Tool = AnnotationTool.None;
         _armed = kind;
         _armedSignature = signature;
         View.PlacementMode = true;
@@ -563,8 +712,27 @@ public partial class DocumentView : UserControl, IDisposable
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        var typing = Keyboard.FocusedElement is TextBox or PasswordBox;
+        if (e.Key == Key.Delete && !typing && Annotations.Selected != null)
+        {
+            Annotations.DeleteSelected();
+            e.Handled = true;
+            return;
+        }
         if (e.Key != Key.Escape) return;
         if (Keyboard.FocusedElement is TextBox box && box != SearchBox) return;
+        if (Annotations.Selected != null)
+        {
+            Annotations.ClearSelection();
+            e.Handled = true;
+            return;
+        }
+        if (Annotations.Tool != AnnotationTool.None)
+        {
+            SetAnnotationTool(AnnotationTool.None);
+            e.Handled = true;
+            return;
+        }
         if (Stamps.HasLive)
         {
             Stamps.Commit();

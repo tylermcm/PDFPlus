@@ -118,6 +118,7 @@
                 <controls:PdfView x:Name="View" />
             </ScrollViewer>
 
+            <views:AnnotationLayer x:Name="Annotations" Margin="0,0,12,0" />
             <views:StampLayer x:Name="Stamps" Margin="0,0,12,0" />
 
             <Border x:Name="PlacementHint" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,14,0,0"

@@ -11,7 +11,7 @@ public enum AskResult { Primary, Secondary, Cancel }
 /// <summary>Small themed dialogs built in code so they match the app in light and dark mode.</summary>
 public static class Dialogs
 {
-    private static Window CreateWindow(Window? owner, string title)
+    internal static Window CreateWindow(Window? owner, string title)
     {
         var window = new Window
         {
@@ -32,7 +32,7 @@ public static class Dialogs
         return window;
     }
 
-    private static StackPanel Body(string heading, string? message)
+    internal static StackPanel Body(string heading, string? message)
     {
         var panel = new StackPanel { Margin = new Thickness(24, 20, 24, 20), MaxWidth = 460, MinWidth = 340 };
         panel.Children.Add(new TextBlock
@@ -52,7 +52,7 @@ public static class Dialogs
         return panel;
     }
 
-    private static Button MakeButton(string text, bool accent)
+    internal static Button MakeButton(string text, bool accent)
     {
         return new Button
         {
@@ -176,7 +176,7 @@ public static class Dialogs
         }
     }
 
-    private static StackPanel Row(params Button[] buttons)
+    internal static StackPanel Row(params Button[] buttons)
     {
         var row = new StackPanel
         {

@@ -35,7 +35,7 @@ public sealed record PathFigureData(Point[] Points, bool Closed);
 /// All public members are UI-thread friendly; <see cref="Render"/> is also safe from the render thread.
 /// "Display space" means points with the origin at the top-left of the page after /Rotate is applied.
 /// </summary>
-public sealed unsafe class PdfDocument : IDisposable
+public sealed unsafe partial class PdfDocument : IDisposable
 {
     private const int MaxOpenPages = 24;
     private const int MaxUndoSteps = 40;
@@ -877,12 +877,8 @@ public sealed unsafe class PdfDocument : IDisposable
     public void Save(string path)
     {
         var fullPath = Path.GetFullPath(path);
-        lock (PdfLibrary.Sync)
-        {
-            if (_form != IntPtr.Zero) FORM_ForceToKillFocus(_form);
-            _formFocusPage = -1;
-            PdfLibrary.WriteFileAtomically(fullPath, stream => PdfLibrary.Save(_file.Handle, stream));
-        }
+        var bytes = BuildOutput();
+        PdfLibrary.WriteFileAtomically(fullPath, stream => stream.Write(bytes));
         FilePath = fullPath;
         IsDirty = false;
         StateChanged?.Invoke(this, EventArgs.Empty);

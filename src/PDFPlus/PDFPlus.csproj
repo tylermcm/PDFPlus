@@ -33,6 +33,8 @@
   <ItemGroup>
     <!-- PDFium (Chrome's PDF engine), BSD-3 licensed native build. -->
     <PackageReference Include="bblanchon.PDFium.Win32" Version="155.0.8044" />
+    <!-- PDFsharp (MIT): AES-256 password protection and object compaction on export. -->
+    <PackageReference Include="PDFsharp" Version="6.2.4" />
   </ItemGroup>
 
   <ItemGroup>

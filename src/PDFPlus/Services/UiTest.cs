@@ -107,6 +107,33 @@ internal static class UiTest
             Snap(dialog, "10-signature-dialog");
             dialog.Close();
 
+            // Phase 2: annotate mode, selection bar and note editor.
+            view.Viewer.FitMode = FitMode.Width;
+            view.Viewer.GoToPage(0);
+            window.SetToolMode(MainWindow.ToolMode.Annotate);
+            var fox = doc.Search("quick brown fox", false, false, CancellationToken.None).FirstOrDefault(h => h.PageIndex == 0);
+            if (fox != null) doc.AddTextMarkup(0, MarkupKind.Highlight, fox.Rects, Color.FromRgb(0xFF, 0xD4, 0x00));
+            doc.AddInk(0, [[new Point(380, 60), new Point(420, 95), new Point(470, 50), new Point(520, 90)]], Color.FromRgb(0xE5, 0x39, 0x35), 2);
+            doc.AddShape(0, ShapeKind.Ellipse, new Rect(60, 175, 120, 40), Color.FromRgb(0x2F, 0x80, 0xED), 2);
+            doc.AddArrow(0, new Point(300, 240), new Point(215, 285), Color.FromRgb(0x3D, 0xDC, 0x84), 2);
+            doc.AddNote(0, new Point(470, 250), "Check this paragraph before sending.", Color.FromRgb(0xFF, 0xD4, 0x00));
+            view.SetAnnotationTool(AnnotationTool.Pen);
+            await Settle(1800);
+            Snap(window, "11-annotate-mode");
+
+            view.SetAnnotationTool(AnnotationTool.None);
+            await Settle(300);
+            view.Annotations.TrySelectAt(new PageHit(0, new Point(480, 260)), 1);
+            await Settle(600);
+            Snap(window, "12-note-selected");
+            view.Annotations.EditSelectedNote();
+            await Settle(600);
+            Snap(window, "13-note-editor");
+            view.Annotations.Tool = AnnotationTool.None;
+            window.SetToolMode(MainWindow.ToolMode.FillSign);
+            await Settle(400);
+            Snap(window, "14-fill-sign-row");
+
             // Leave the document clean so closing the window does not prompt.
             doc.Save(Path.Combine(outputDirectory, "uitest-result.pdf"));
             log.AppendLine($"saved uitest-result.pdf, pages={doc.PageCount}");

@@ -26,6 +26,7 @@ public sealed class DocumentTab : INotifyPropertyChanged
     public string Title => Document.Title;
     public string? FullPath => Document.FilePath;
     public bool IsDirty => Document.IsDirty;
+    public bool IsProtected => Document.IsProtected;
 
     public bool IsActive
     {
@@ -42,6 +43,7 @@ public sealed class DocumentTab : INotifyPropertyChanged
         OnChanged(nameof(Title));
         OnChanged(nameof(FullPath));
         OnChanged(nameof(IsDirty));
+        OnChanged(nameof(IsProtected));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -81,6 +83,7 @@ public partial class MainWindow : Window
         Closing += OnWindowClosing;
 
         UpdateWindowStateChrome();
+        BuildAnnotationOptions();
         RefreshRecent();
         UpdateChrome();
     }
@@ -143,6 +146,22 @@ public partial class MainWindow : Window
         CrossStampButton.IsChecked = armed == StampKind.Cross;
         DateStampButton.IsChecked = armed == StampKind.Date;
         SignButton.IsChecked = armed == StampKind.Signature;
+
+        var annotationTool = view.AnnotationTool;
+        if (annotationTool != AnnotationTool.None)
+        {
+            SelectToolButton.IsChecked = false;
+            HandToolButton.IsChecked = false;
+        }
+        AnnotateModeButton.IsChecked = _toolMode == ToolMode.Annotate;
+        FillSignModeButton.IsChecked = _toolMode == ToolMode.FillSign;
+        ToolRow.Visibility = _toolMode == ToolMode.None ? Visibility.Collapsed : Visibility.Visible;
+        AnnotateRow.Visibility = _toolMode == ToolMode.Annotate ? Visibility.Visible : Visibility.Collapsed;
+        FillSignRow.Visibility = _toolMode == ToolMode.FillSign ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var button in AnnotateRow.Children.OfType<ToggleButton>())
+            if (button.Tag is string name && Enum.TryParse<AnnotationTool>(name, out var buttonTool))
+                button.IsChecked = buttonTool == annotationTool;
+        UpdateAnnotationOptions();
         tab.Refresh();
     }
 
@@ -157,6 +176,12 @@ public partial class MainWindow : Window
             tab.Refresh();
             if (_active == tab) UpdateChrome();
         };
+        view.SaveRequested += (_, _) =>
+        {
+            if (Save(tab, saveAs: false))
+                view.ShowToast(tab.Document.IsProtected ? "Saved with password protection" : "Saved without a password");
+        };
+        ApplyAnnotationSettings(view);
         DocumentHost.Children.Add(view);
         _tabs.Add(tab);
         SelectTab(tab);
@@ -512,7 +537,7 @@ public partial class MainWindow : Window
     {
         if (ActiveView is not { } view) return;
         view.CommitStamps();
-        view.Disarm();
+        view.SetAnnotationTool(AnnotationTool.None);
         view.Viewer.Tool = tool;
         UpdateChrome();
     }
@@ -688,6 +713,110 @@ public partial class MainWindow : Window
         UpdateChrome();
     }
 
+    // ---------------------------------------------------------------- annotate / fill & sign modes
+
+    internal enum ToolMode { None, Annotate, FillSign }
+
+    private static readonly string[] AnnotationPalette = ["#FFD400", "#3DDC84", "#2F80ED", "#FF4FA3", "#E53935", "#1C1D22"];
+    private ToolMode _toolMode;
+
+    private void OnAnnotateModeClick(object sender, RoutedEventArgs e) =>
+        SetToolMode(_toolMode == ToolMode.Annotate ? ToolMode.None : ToolMode.Annotate);
+
+    private void OnFillSignModeClick(object sender, RoutedEventArgs e) =>
+        SetToolMode(_toolMode == ToolMode.FillSign ? ToolMode.None : ToolMode.FillSign);
+
+    internal void SetToolMode(ToolMode mode)
+    {
+        _toolMode = mode;
+        if (ActiveView is { } view)
+        {
+            if (mode != ToolMode.Annotate && view.AnnotationTool != AnnotationTool.None) view.SetAnnotationTool(AnnotationTool.None);
+            if (mode != ToolMode.FillSign)
+            {
+                view.CommitStamps();
+                view.Disarm();
+            }
+        }
+        UpdateChrome();
+    }
+
+    private void OnAnnotationToolClick(object sender, RoutedEventArgs e)
+    {
+        if (ActiveView is not { } view || (sender as FrameworkElement)?.Tag is not string name ||
+            !Enum.TryParse<AnnotationTool>(name, out var tool))
+            return;
+        ApplyAnnotationSettings(view);
+        view.SetAnnotationTool(view.AnnotationTool == tool ? AnnotationTool.None : tool);
+        UpdateChrome();
+    }
+
+    private void BuildAnnotationOptions()
+    {
+        foreach (var hex in AnnotationPalette)
+        {
+            var swatch = new System.Windows.Shapes.Ellipse
+            {
+                Width = 16,
+                Height = 16,
+                Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)),
+                StrokeThickness = 2,
+            };
+            var button = new Button { Content = swatch, Tag = hex, ToolTip = "Annotation color", MinWidth = 28, Padding = new Thickness(4, 0, 4, 0) };
+            button.Click += (_, _) =>
+            {
+                AppSettings.Current.AnnotationColor = hex;
+                AppSettings.Current.Save();
+                if (ActiveView is { } view) ApplyAnnotationSettings(view);
+                UpdateAnnotationOptions();
+            };
+            ColorSwatches.Children.Add(button);
+        }
+
+        foreach (var (label, width) in new[] { ("Thin", 1.0), ("Medium", 2.0), ("Thick", 4.0) })
+        {
+            var line = new System.Windows.Shapes.Rectangle { Width = 18, Height = width + 0.5, RadiusX = 1, RadiusY = 1 };
+            line.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "Brush.Text");
+            var button = new ToggleButton { Content = line, Tag = width, ToolTip = $"{label} lines", MinWidth = 30 };
+            button.Click += (_, _) =>
+            {
+                AppSettings.Current.AnnotationWidth = width;
+                AppSettings.Current.Save();
+                if (ActiveView is { } view) ApplyAnnotationSettings(view);
+                UpdateAnnotationOptions();
+            };
+            WidthChoices.Children.Add(button);
+        }
+    }
+
+    private void UpdateAnnotationOptions()
+    {
+        var settings = AppSettings.Current;
+        foreach (var button in ColorSwatches.Children.OfType<Button>())
+        {
+            if (button.Content is not System.Windows.Shapes.Ellipse swatch) continue;
+            if (string.Equals(button.Tag as string, settings.AnnotationColor, StringComparison.OrdinalIgnoreCase))
+                swatch.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "Brush.Text");
+            else
+                swatch.Stroke = null;
+        }
+        foreach (var toggle in WidthChoices.Children.OfType<ToggleButton>())
+            toggle.IsChecked = toggle.Tag is double width && Math.Abs(width - settings.AnnotationWidth) < 0.01;
+    }
+
+    private static void ApplyAnnotationSettings(DocumentView view)
+    {
+        try
+        {
+            view.AnnotationColor = (Color)ColorConverter.ConvertFromString(AppSettings.Current.AnnotationColor);
+        }
+        catch
+        {
+            view.AnnotationColor = Color.FromRgb(0xFF, 0xD4, 0x00);
+        }
+        view.AnnotationWidth = Math.Clamp(AppSettings.Current.AnnotationWidth, 0.5, 12);
+    }
+
     private void OnPagesMenuClick(object sender, RoutedEventArgs e)
     {
         if (ActiveView is not { } view) return;
@@ -731,6 +860,13 @@ public partial class MainWindow : Window
             menu.Items.Add(DocumentView.MenuItemFor("Save as…", "", () => Save(tab, saveAs: true), "Ctrl+Shift+S"));
             menu.Items.Add(DocumentView.MenuItemFor("Print…", "", Print, "Ctrl+P"));
             menu.Items.Add(DocumentView.MenuItemFor("Close tab", "", () => CloseTab(tab), "Ctrl+W"));
+            menu.Items.Add(new Separator());
+            var view = tab.View;
+            var isProtected = view.Document.IsProtected;
+            menu.Items.Add(DocumentView.MenuItemFor(isProtected ? "Change password…" : "Password protect…", "", view.ProtectWithPassword));
+            if (isProtected) menu.Items.Add(DocumentView.MenuItemFor("Remove password…", "", view.RemovePassword));
+            menu.Items.Add(DocumentView.MenuItemFor("Export pages as images…", "", view.ExportImages));
+            menu.Items.Add(DocumentView.MenuItemFor("Save compressed copy…", "", view.CompressCopy));
         }
         menu.Items.Add(new Separator());
 

@@ -79,6 +79,10 @@
                                             <Button DockPanel.Dock="Right" Content="&#xE8BB;" FontSize="8" Width="24" Height="24" MinWidth="24"
                                                     Padding="0" Margin="6,0,0,0" Style="{StaticResource ToolButton}" ToolTip="Close (Ctrl+W)"
                                                     Click="OnTabCloseClick" />
+                                            <TextBlock DockPanel.Dock="Right" Text="&#xE72E;" FontFamily="{StaticResource IconFont}" FontSize="11"
+                                                       Margin="6,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextDim}"
+                                                       ToolTip="Password protected"
+                                                       Visibility="{Binding IsProtected, Converter={StaticResource BoolToVisibility}}" />
                                             <Ellipse DockPanel.Dock="Right" Width="7" Height="7" Margin="6,0,0,0" VerticalAlignment="Center"
                                                      Fill="{DynamicResource Brush.Accent}" ToolTip="Unsaved changes"
                                                      Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisibility}}" />
@@ -119,6 +123,7 @@
                     <Style TargetType="ToggleButton" BasedOn="{StaticResource ToolToggle}" />
                     <Style TargetType="Border" BasedOn="{StaticResource ToolSeparator}" />
                 </Border.Resources>
+                <StackPanel>
                 <DockPanel LastChildFill="False">
                     <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
                         <Button Content="&#xE8A0;" ToolTip="Show or hide pages sidebar (F4)" Click="OnToggleSidebarClick" />
@@ -162,14 +167,16 @@
                         <ToggleButton x:Name="SelectToolButton" Content="&#xE8B3;" ToolTip="Select text (V)" Click="OnSelectToolClick" />
                         <ToggleButton x:Name="HandToolButton" Content="&#xE7C9;" ToolTip="Hand tool (H)" Click="OnHandToolClick" />
                         <Border />
-                        <ToggleButton x:Name="TextStampButton" Content="&#xE8D2;" ToolTip="Add text" Click="OnTextStampClick" />
-                        <ToggleButton x:Name="CheckStampButton" Content="&#xE73E;" ToolTip="Add checkmark" Click="OnCheckStampClick" />
-                        <ToggleButton x:Name="CrossStampButton" Content="&#xE711;" ToolTip="Add cross" Click="OnCrossStampClick" />
-                        <ToggleButton x:Name="DateStampButton" Content="&#xE787;" ToolTip="Add today's date" Click="OnDateStampClick" />
-                        <ToggleButton x:Name="SignButton" ToolTip="Sign" Click="OnSignClick" Padding="10,0">
+                        <ToggleButton x:Name="AnnotateModeButton" ToolTip="Highlight, draw and comment" Click="OnAnnotateModeClick" Padding="10,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE76D;" VerticalAlignment="Center" />
+                                <TextBlock Text="Annotate" FontFamily="{StaticResource UiFont}" FontSize="13" Margin="7,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </ToggleButton>
+                        <ToggleButton x:Name="FillSignModeButton" ToolTip="Type text, tick boxes and sign" Click="OnFillSignModeClick" Padding="10,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE70F;" VerticalAlignment="Center" />
-                                <TextBlock Text="Sign" FontFamily="{StaticResource UiFont}" FontSize="13" Margin="7,0,0,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Fill &amp; Sign" FontFamily="{StaticResource UiFont}" FontSize="13" Margin="7,0,0,0" VerticalAlignment="Center" />
                             </StackPanel>
                         </ToggleButton>
                         <Border />
@@ -182,6 +189,59 @@
                         </Button>
                     </StackPanel>
                 </DockPanel>
+
+                <!-- Second row for the active tool mode -->
+                <Grid x:Name="ToolRow" Margin="0,5,0,0" Visibility="Collapsed">
+                    <StackPanel x:Name="AnnotateRow" Orientation="Horizontal" Visibility="Collapsed">
+                        <ToggleButton Tag="Highlight" ToolTip="Highlight: drag across text" Click="OnAnnotationToolClick" FontFamily="{StaticResource UiFont}" FontSize="13">
+                            <Border Style="{x:Null}" Background="#66FFD400" Padding="3,0" CornerRadius="2">
+                                <TextBlock Text="ab" />
+                            </Border>
+                        </ToggleButton>
+                        <ToggleButton Tag="Underline" ToolTip="Underline: drag across text" Click="OnAnnotationToolClick" FontFamily="{StaticResource UiFont}" FontSize="13">
+                            <TextBlock Text="ab" TextDecorations="Underline" />
+                        </ToggleButton>
+                        <ToggleButton Tag="Strikeout" ToolTip="Strike out: drag across text" Click="OnAnnotationToolClick" FontFamily="{StaticResource UiFont}" FontSize="13">
+                            <TextBlock Text="ab" TextDecorations="Strikethrough" />
+                        </ToggleButton>
+                        <Border />
+                        <ToggleButton Tag="Pen" Content="&#xE76D;" ToolTip="Draw freehand" Click="OnAnnotationToolClick" />
+                        <ToggleButton Tag="Rectangle" Content="&#xE71A;" ToolTip="Rectangle" Click="OnAnnotationToolClick" />
+                        <ToggleButton Tag="Ellipse" Content="&#xEA3A;" ToolTip="Ellipse" Click="OnAnnotationToolClick" />
+                        <ToggleButton Tag="Arrow" ToolTip="Arrow" Click="OnAnnotationToolClick">
+                            <TextBlock Text="&#xE72A;" RenderTransformOrigin="0.5,0.5">
+                                <TextBlock.RenderTransform>
+                                    <RotateTransform Angle="-45" />
+                                </TextBlock.RenderTransform>
+                            </TextBlock>
+                        </ToggleButton>
+                        <ToggleButton Tag="Note" Content="&#xE90A;" ToolTip="Sticky note" Click="OnAnnotationToolClick" />
+                        <Border />
+                        <StackPanel x:Name="ColorSwatches" Orientation="Horizontal" />
+                        <Border />
+                        <StackPanel x:Name="WidthChoices" Orientation="Horizontal" />
+                        <Border />
+                        <TextBlock Text="Click an annotation to select it, Del removes it" VerticalAlignment="Center" Margin="4,0"
+                                   FontSize="12" Foreground="{DynamicResource Brush.TextDim}" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="FillSignRow" Orientation="Horizontal" Visibility="Collapsed">
+                        <ToggleButton x:Name="TextStampButton" Content="&#xE8D2;" ToolTip="Add text" Click="OnTextStampClick" />
+                        <ToggleButton x:Name="CheckStampButton" Content="&#xE73E;" ToolTip="Add checkmark" Click="OnCheckStampClick" />
+                        <ToggleButton x:Name="CrossStampButton" Content="&#xE711;" ToolTip="Add cross" Click="OnCrossStampClick" />
+                        <ToggleButton x:Name="DateStampButton" Content="&#xE787;" ToolTip="Add today's date" Click="OnDateStampClick" />
+                        <ToggleButton x:Name="SignButton" ToolTip="Sign" Click="OnSignClick" Padding="10,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE70F;" VerticalAlignment="Center" />
+                                <TextBlock Text="Sign" FontFamily="{StaticResource UiFont}" FontSize="13" Margin="7,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </ToggleButton>
+                        <Border />
+                        <TextBlock Text="Interactive form fields can be filled directly on the page" VerticalAlignment="Center" Margin="4,0"
+                                   FontSize="12" Foreground="{DynamicResource Brush.TextDim}" />
+                    </StackPanel>
+                </Grid>
+                </StackPanel>
             </Border>
 
             <!-- Documents -->

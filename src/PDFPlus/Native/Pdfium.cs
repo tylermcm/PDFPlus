@@ -159,4 +159,86 @@ internal static unsafe class Pdfium
     // fpdf_ppo.h / fpdf_save.h
     [DllImport(Lib)] public static extern int FPDF_ImportPagesByIndex(IntPtr destDoc, IntPtr srcDoc, int* pageIndices, uint length, int index);
     [DllImport(Lib)] public static extern int FPDF_SaveAsCopy(IntPtr document, FPDF_FILEWRITE* fileWrite, uint flags);
+    [DllImport(Lib)] public static extern int FPDF_GetSecurityHandlerRevision(IntPtr document);
+
+    public const uint FPDF_REMOVE_SECURITY = 1 << 2;
+
+    // Bitmap inspection (image compression)
+    public const int FPDFBitmap_Gray = 1, FPDFBitmap_BGR = 2, FPDFBitmap_BGRA = 4;
+    [DllImport(Lib)] public static extern int FPDFBitmap_GetFormat(IntPtr bitmap);
+    [DllImport(Lib)] public static extern int FPDFBitmap_GetWidth(IntPtr bitmap);
+    [DllImport(Lib)] public static extern int FPDFBitmap_GetHeight(IntPtr bitmap);
+    [DllImport(Lib)] public static extern int FPDFBitmap_GetStride(IntPtr bitmap);
+    [DllImport(Lib)] public static extern IntPtr FPDFBitmap_GetBuffer(IntPtr bitmap);
+
+    // fpdf_edit.h: page objects and images
+    public const int FPDF_PAGEOBJ_IMAGE = 3;
+    [DllImport(Lib)] public static extern int FPDFPage_CountObjects(IntPtr page);
+    [DllImport(Lib)] public static extern IntPtr FPDFPage_GetObject(IntPtr page, int index);
+    [DllImport(Lib)] public static extern int FPDFPageObj_GetType(IntPtr pageObject);
+    [DllImport(Lib)] public static extern IntPtr FPDFImageObj_GetBitmap(IntPtr imageObject);
+    [DllImport(Lib)] public static extern IntPtr FPDFImageObj_GetRenderedBitmap(IntPtr document, IntPtr page, IntPtr imageObject);
+    [DllImport(Lib)] public static extern int FPDFImageObj_GetImageMetadata(IntPtr imageObject, IntPtr page, FPDF_IMAGEOBJ_METADATA* metadata);
+    [DllImport(Lib)] public static extern uint FPDFImageObj_GetImageDataRaw(IntPtr imageObject, void* buffer, uint bufLen);
+    [DllImport(Lib)] public static extern int FPDFImageObj_LoadJpegFileInline(IntPtr* pages, int count, IntPtr imageObject, FPDF_FILEACCESS* fileAccess);
+
+    // fpdf_annot.h
+    public const int FPDF_ANNOT_TEXT = 1, FPDF_ANNOT_LINK = 2, FPDF_ANNOT_SQUARE = 5, FPDF_ANNOT_CIRCLE = 6,
+        FPDF_ANNOT_HIGHLIGHT = 9, FPDF_ANNOT_UNDERLINE = 10, FPDF_ANNOT_SQUIGGLY = 11, FPDF_ANNOT_STRIKEOUT = 12,
+        FPDF_ANNOT_INK = 15, FPDF_ANNOT_POPUP = 16, FPDF_ANNOT_WIDGET = 20;
+    public const int FPDF_ANNOT_FLAG_PRINT = 1 << 2;
+    public const int FPDFANNOT_COLORTYPE_Color = 0, FPDFANNOT_COLORTYPE_InteriorColor = 1;
+    [DllImport(Lib)] public static extern IntPtr FPDFPage_CreateAnnot(IntPtr page, int subtype);
+    [DllImport(Lib)] public static extern int FPDFPage_GetAnnotCount(IntPtr page);
+    [DllImport(Lib)] public static extern IntPtr FPDFPage_GetAnnot(IntPtr page, int index);
+    [DllImport(Lib)] public static extern int FPDFPage_GetAnnotIndex(IntPtr page, IntPtr annot);
+    [DllImport(Lib)] public static extern void FPDFPage_CloseAnnot(IntPtr annot);
+    [DllImport(Lib)] public static extern int FPDFPage_RemoveAnnot(IntPtr page, int index);
+    [DllImport(Lib)] public static extern int FPDFAnnot_GetSubtype(IntPtr annot);
+    [DllImport(Lib)] public static extern int FPDFAnnot_SetColor(IntPtr annot, int type, uint r, uint g, uint b, uint a);
+    [DllImport(Lib)] public static extern int FPDFAnnot_SetRect(IntPtr annot, FS_RECTF* rect);
+    [DllImport(Lib)] public static extern int FPDFAnnot_GetRect(IntPtr annot, FS_RECTF* rect);
+    [DllImport(Lib)] public static extern int FPDFAnnot_AppendAttachmentPoints(IntPtr annot, FS_QUADPOINTSF* quadPoints);
+    [DllImport(Lib)] public static extern int FPDFAnnot_AddInkStroke(IntPtr annot, FS_POINTF* points, nuint pointCount);
+    [DllImport(Lib)] public static extern int FPDFAnnot_SetBorder(IntPtr annot, float horizontalRadius, float verticalRadius, float borderWidth);
+    [DllImport(Lib)] public static extern int FPDFAnnot_SetStringValue(IntPtr annot, [MarshalAs(UnmanagedType.LPStr)] string key, [MarshalAs(UnmanagedType.LPWStr)] string value);
+    [DllImport(Lib)] public static extern uint FPDFAnnot_GetStringValue(IntPtr annot, [MarshalAs(UnmanagedType.LPStr)] string key, ushort* buffer, uint bufLen);
+    [DllImport(Lib)] public static extern int FPDFAnnot_SetFlags(IntPtr annot, int flags);
+    [DllImport(Lib)] public static extern IntPtr FPDFAnnot_GetLinkedAnnot(IntPtr annot, [MarshalAs(UnmanagedType.LPStr)] string key);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct FS_RECTF
+{
+    public float left, top, right, bottom;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct FS_POINTF
+{
+    public float x, y;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct FS_QUADPOINTSF
+{
+    public float x1, y1, x2, y2, x3, y3, x4, y4;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct FPDF_FILEACCESS
+{
+    public uint m_FileLen;
+    public delegate* unmanaged<IntPtr, uint, byte*, uint, int> m_GetBlock;
+    public IntPtr m_Param;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct FPDF_IMAGEOBJ_METADATA
+{
+    public uint width, height;
+    public float horizontal_dpi, vertical_dpi;
+    public uint bits_per_pixel;
+    public int colorspace;
+    public int marked_content_id;
 }

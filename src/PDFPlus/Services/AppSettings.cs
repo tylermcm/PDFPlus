@@ -29,6 +29,8 @@ public sealed class AppSettings
     public List<SavedSignature> Signatures { get; set; } = new();
     public double TextSize { get; set; } = 11;
     public string InkColor { get; set; } = "#000000";
+    public string AnnotationColor { get; set; } = "#FFD400";
+    public double AnnotationWidth { get; set; } = 2;
     public double WindowWidth { get; set; } = 1280;
     public double WindowHeight { get; set; } = 860;
     public bool WindowMaximized { get; set; }

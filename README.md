@@ -18,7 +18,18 @@ A fast, portable PDF viewer and editor for Windows. One exe, no installer, no ac
 - Rotate, delete, insert blank pages, insert pages from other PDFs (or drop PDFs onto the thumbnails)
 - Extract a page range to a new PDF, split a document every N pages, combine several PDFs into one
 
-**Fill & sign**
+**Annotate** (toolbar → Annotate)
+- Highlight, underline and strike out text by dragging across it
+- Freehand pen, rectangles, ellipses, arrows and sticky notes, in six colors and three line widths
+- Click an annotation to select it; Del removes it, double-click a note to edit it
+- Saved as standard PDF annotations, so Acrobat, browsers and phones show them too
+
+**Security & export** (toolbar → ⋯)
+- Password protect with AES-256, choose whether printing, copying and editing are allowed; change or remove the password
+- Export pages as PNG or JPG at 72/150/300 dpi
+- Save a compressed copy (large images are downsampled; text stays sharp)
+
+**Fill & sign** (toolbar → Fill & Sign)
 - Fill interactive PDF forms (text fields, checkboxes, radio buttons, dropdowns)
 - Type text anywhere, add checkmarks, crosses and today's date (for flat forms that aren't interactive)
 - Draw or type a signature. It's placed as vector outlines, is reusable, and is saved only on this computer

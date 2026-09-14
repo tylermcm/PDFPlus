@@ -1,6 +1,8 @@
 bin/
 obj/
 dist/
+# Large generated fixture: python tools/make-image-pdf.py tests/images.pdf
+tests/images.pdf
 .vs/
 *.user
 *.suo

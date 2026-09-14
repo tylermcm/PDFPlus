@@ -110,6 +110,80 @@ internal static class SelfTest
 
             using (var combined = PdfDocument.Combine([(input, null), (extracted, null)]))
                 Check("combine files", combined.PageCount == before + 2, $"{combined.PageCount}");
+
+            // ---- Phase 2: annotations
+            var p = doc.PageCount - 1;
+            doc.AddTextMarkup(p, MarkupKind.Highlight, doc.TextRects(p, 0, 12), Colors.Yellow);
+            doc.AddInk(p, [[new Point(100, 100), new Point(150, 140), new Point(200, 100)]], Colors.Red, 2);
+            doc.AddShape(p, ShapeKind.Rectangle, new Rect(100, 300, 150, 80), Colors.Blue, 2);
+            doc.AddArrow(p, new Point(300, 300), new Point(400, 400), Colors.Green, 2);
+            doc.AddNote(p, new Point(500, 50), "Remember this", Colors.Orange);
+            var annotations = doc.GetAnnotations(p);
+            Check("annotations created", annotations.Count == 5, $"{annotations.Count}");
+            Check("note contents", annotations.Any(a => a.IsNote && a.Contents == "Remember this"));
+            var pw = (int)doc.PageSizes[p].Width;
+            var ph = (int)doc.PageSizes[p].Height;
+            var annotated = doc.Render(p, pw, ph, new Int32Rect(0, 0, pw, ph));
+            var colored = annotated == null ? 0 : CountColored(annotated);
+            Check("annotations render", colored > 500, $"{colored} colored pixels");
+            if (annotated != null) SavePng(annotated, Path.Combine(outputDirectory, "annotations.png"));
+            doc.DeleteAnnotation(annotations.First(a => a.Subtype == 5));
+            Check("delete annotation", doc.GetAnnotations(p).Count == 4);
+            doc.UpdateNote(doc.GetAnnotations(p).First(a => a.IsNote), "Updated");
+            Check("update note", doc.GetAnnotations(p).First(a => a.IsNote).Contents == "Updated");
+
+            // ---- Phase 2: export
+            var png = Path.Combine(outputDirectory, "export-page1.png");
+            doc.ExportPageImage(0, png, 150, ImageExportFormat.Png);
+            Check("export png", File.Exists(png) && new FileInfo(png).Length > 1000);
+            var jpg = Path.Combine(outputDirectory, "export-page1.jpg");
+            doc.ExportPageImage(0, jpg, 100, ImageExportFormat.Jpeg);
+            Check("export jpeg", File.Exists(jpg) && new FileInfo(jpg).Length > 1000);
+
+            // ---- Phase 2: password protection
+            doc.SetProtection(new PdfProtection("secret", "", AllowPrint: true, AllowCopy: false, AllowEdit: false));
+            var locked = Path.Combine(outputDirectory, "protected.pdf");
+            doc.Save(locked);
+            try
+            {
+                using var probe = await PdfDocument.OpenAsync(locked, null);
+                Check("protected file needs password", false);
+            }
+            catch (PdfPasswordRequiredException)
+            {
+                Check("protected file needs password", true);
+            }
+            using (var unlocked = await PdfDocument.OpenAsync(locked, "secret"))
+            {
+                Check("open with password", unlocked.PageCount == doc.PageCount && unlocked.IsEncrypted);
+                Check("annotations survive encryption", unlocked.GetAnnotations(p).Count == 4);
+                unlocked.ClearProtection();
+                var plain = Path.Combine(outputDirectory, "unprotected.pdf");
+                unlocked.Save(plain);
+                using var reopenedPlain = await PdfDocument.OpenAsync(plain, null);
+                Check("remove password", reopenedPlain.PageCount == doc.PageCount && !reopenedPlain.IsEncrypted);
+            }
+
+            // ---- Phase 2: compression
+            var imagesPdf = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input))!, "images.pdf");
+            if (File.Exists(imagesPdf))
+            {
+                using var heavy = await PdfDocument.OpenAsync(imagesPdf, null);
+                var compressedPath = Path.Combine(outputDirectory, "compressed.pdf");
+                var result = heavy.SaveCompressedCopy(compressedPath, 100, 70, CancellationToken.None);
+                Check("compress images", result.Written && result.ImagesRecompressed == 3 && result.CompressedBytes < result.OriginalBytes / 3,
+                    $"{result.OriginalBytes:N0} -> {result.CompressedBytes:N0} bytes, {result.ImagesRecompressed} images");
+                using var light = await PdfDocument.OpenAsync(compressedPath, null);
+                var cw = (int)light.PageSizes[0].Width;
+                var ch = (int)light.PageSizes[0].Height;
+                var compressedRender = light.Render(0, cw, ch, new Int32Rect(0, 0, cw, ch));
+                Check("compressed copy renders image", compressedRender != null && CountColored(compressedRender) > 20000);
+                if (compressedRender != null) SavePng(compressedRender, Path.Combine(outputDirectory, "compressed-page1.png"));
+            }
+            else
+            {
+                Check("compress images (tests/images.pdf missing)", false);
+            }
         }
         catch (Exception ex)
         {
@@ -125,6 +199,17 @@ internal static class SelfTest
         var pixels = new int[bitmap.PixelWidth * bitmap.PixelHeight];
         bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
         return pixels.Count(p => ((p >> 16) & 0xFF) + ((p >> 8) & 0xFF) + (p & 0xFF) < 300);
+    }
+
+    private static int CountColored(BitmapSource bitmap)
+    {
+        var pixels = new int[bitmap.PixelWidth * bitmap.PixelHeight];
+        bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
+        return pixels.Count(px =>
+        {
+            int r = (px >> 16) & 0xFF, g = (px >> 8) & 0xFF, b = px & 0xFF;
+            return Math.Abs(r - g) > 40 || Math.Abs(g - b) > 40 || Math.Abs(r - b) > 40;
+        });
     }
 
     private static void SavePng(BitmapSource bitmap, string path)
