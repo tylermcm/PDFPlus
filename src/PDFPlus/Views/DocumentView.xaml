@@ -1,0 +1,152 @@
+<UserControl x:Class="PDFPlus.Views.DocumentView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:PDFPlus.Controls"
+             xmlns:views="clr-namespace:PDFPlus.Views"
+             xmlns:core="clr-namespace:PDFPlus.Core"
+             Focusable="False">
+    <UserControl.Resources>
+        <Style x:Key="ThumbItem" TargetType="ListBoxItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Margin="10,2" Padding="8,8,8,4" CornerRadius="8" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.AccentSoft}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SegmentToggle" TargetType="ToggleButton" BasedOn="{StaticResource ToolToggle}">
+            <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Padding" Value="12,0" />
+        </Style>
+
+        <Style x:Key="SearchToggle" TargetType="ToggleButton" BasedOn="{StaticResource ToolToggle}">
+            <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinWidth" Value="30" />
+            <Setter Property="Padding" Value="4,0" />
+        </Style>
+
+        <Style x:Key="SmallTool" TargetType="Button" BasedOn="{StaticResource ToolButton}">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinWidth" Value="28" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="4,0" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="SidebarColumn" Width="210" MaxWidth="480" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border x:Name="Sidebar" Background="{DynamicResource Brush.Sidebar}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal" Margin="10,8,10,6">
+                    <ToggleButton x:Name="PagesTab" Content="Pages" Style="{StaticResource SegmentToggle}" IsChecked="True" Click="OnPagesTab" />
+                    <ToggleButton x:Name="BookmarksTab" Content="Bookmarks" Style="{StaticResource SegmentToggle}" Margin="4,0,0,0" Click="OnBookmarksTab" />
+                </StackPanel>
+
+                <ListBox x:Name="Thumbnails" Grid.Row="1" Background="Transparent" BorderThickness="0" Padding="0,0,0,8"
+                         SelectionMode="Extended" AllowDrop="True" ItemContainerStyle="{StaticResource ThumbItem}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                         VirtualizingPanel.ScrollUnit="Pixel"
+                         SelectionChanged="OnThumbnailSelectionChanged"
+                         PreviewMouseLeftButtonDown="OnThumbPreviewMouseDown"
+                         PreviewMouseLeftButtonUp="OnThumbPreviewMouseUp"
+                         PreviewMouseRightButtonDown="OnThumbPreviewRightMouseDown"
+                         PreviewMouseMove="OnThumbPreviewMouseMove"
+                         DragOver="OnThumbDragOver" DragLeave="OnThumbDragLeave" Drop="OnThumbDrop"
+                         KeyDown="OnThumbKeyDown">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type views:ThumbnailItem}">
+                            <StackPanel>
+                                <Border Background="White" Width="{Binding Width}" Height="{Binding Height}" BorderThickness="1" BorderBrush="#30000000">
+                                    <Image Source="{Binding Image}" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality" />
+                                </Border>
+                                <TextBlock Text="{Binding Label}" HorizontalAlignment="Center" Margin="0,5,0,0" FontSize="11.5"
+                                           Foreground="{DynamicResource Brush.TextDim}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <Grid x:Name="BookmarksPanel" Grid.Row="1" Visibility="Collapsed">
+                    <TreeView x:Name="BookmarkTree" Background="Transparent" BorderThickness="0" Padding="6,0,6,8" FontSize="12.5"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              PreviewMouseLeftButtonUp="OnBookmarkClick" KeyDown="OnBookmarkKeyDown">
+                        <TreeView.ItemTemplate>
+                            <HierarchicalDataTemplate DataType="{x:Type core:Bookmark}" ItemsSource="{Binding Children}">
+                                <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" />
+                            </HierarchicalDataTemplate>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
+                    <TextBlock x:Name="NoBookmarks" Text="This document has no bookmarks." Margin="16" TextWrapping="Wrap"
+                               Foreground="{DynamicResource Brush.TextDim}" Visibility="Collapsed" />
+                </Grid>
+            </Grid>
+        </Border>
+
+        <GridSplitter x:Name="Splitter" Grid.Column="1" Width="5" Margin="-3,0,-2,0" Background="Transparent"
+                      HorizontalAlignment="Stretch" ResizeBehavior="PreviousAndNext" Focusable="False" />
+
+        <Grid x:Name="ViewerHost" Grid.Column="2" Background="{DynamicResource Brush.Canvas}" ClipToBounds="True">
+            <ScrollViewer x:Name="Scroller" CanContentScroll="True" Focusable="False"
+                          HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Visible">
+                <controls:PdfView x:Name="View" />
+            </ScrollViewer>
+
+            <views:StampLayer x:Name="Stamps" Margin="0,0,12,0" />
+
+            <Border x:Name="PlacementHint" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,14,0,0"
+                    CornerRadius="16" Padding="14,7" Background="#E61E1F25" Visibility="Collapsed" IsHitTestVisible="False">
+                <TextBlock x:Name="PlacementHintText" Foreground="White" FontSize="12.5" />
+            </Border>
+
+            <Border x:Name="SearchBar" VerticalAlignment="Top" HorizontalAlignment="Right" Margin="0,10,26,0" Padding="6,4"
+                    CornerRadius="10" Background="{DynamicResource Brush.Popup}" BorderBrush="{DynamicResource Brush.Border}"
+                    BorderThickness="1" Effect="{StaticResource PopupShadow}" Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="13" VerticalAlignment="Center"
+                               Margin="6,0,4,0" Foreground="{DynamicResource Brush.TextDim}" />
+                    <TextBox x:Name="SearchBox" Width="210" Height="28" BorderThickness="0" Background="Transparent" Padding="2,0"
+                             KeyDown="OnSearchKeyDown" />
+                    <TextBlock x:Name="SearchStatus" MinWidth="70" TextAlignment="Right" FontSize="12" Margin="4,0,8,0"
+                               VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextDim}" />
+                    <ToggleButton x:Name="MatchCase" Content="Aa" Style="{StaticResource SearchToggle}" ToolTip="Match case" Click="OnSearchOptionChanged" />
+                    <ToggleButton x:Name="WholeWord" Content="ab" Style="{StaticResource SearchToggle}" ToolTip="Whole words only" Click="OnSearchOptionChanged" />
+                    <Button Content="&#xE70E;" Style="{StaticResource SmallTool}" ToolTip="Previous match (Shift+Enter)" Click="OnSearchPrevious" />
+                    <Button Content="&#xE70D;" Style="{StaticResource SmallTool}" ToolTip="Next match (Enter)" Click="OnSearchNext" />
+                    <Button Content="&#xE711;" Style="{StaticResource SmallTool}" ToolTip="Close (Esc)" Click="OnSearchClose" />
+                </StackPanel>
+            </Border>
+
+            <Border x:Name="Toast" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,30" CornerRadius="18"
+                    Padding="16,8" Background="#EE1E1F25" Opacity="0" IsHitTestVisible="False">
+                <TextBlock x:Name="ToastText" Foreground="White" FontSize="13" />
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>
