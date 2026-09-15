@@ -1,6 +1,6 @@
 # PDFPlus
 
-A fast, portable PDF viewer and editor for Windows. One exe, no installer, no account, no subscription.
+A fast, portable PDF viewer and editor for Windows. No account, no subscription.
 
 ## Features
 
