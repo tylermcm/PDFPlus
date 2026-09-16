@@ -160,9 +160,10 @@ public partial class HomeView : UserControl
 
     public HomeView()
     {
-        InitializeComponent();
+        Services.Timeline.Measure("    home xaml parsed", InitializeComponent);
         Logo.Source = AppIcon.Get(128);
         foreach (var tool in Tools) ToolGrid.Children.Add(MakeToolCard(tool));
+        Services.Timeline.Mark("    home tool cards built");
         AllFilter.IsChecked = true;
         ShowTip(0);
         SizeChanged += (_, _) => UpdateForWidth();

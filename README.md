@@ -59,32 +59,26 @@ A fast, portable PDF viewer and editor for Windows. No account, no subscription.
 
 ## Build
 
-Requires the .NET 8 SDK.
-
-```powershell
-.\build.ps1
-```
-
-This produces `dist\PDFPlus.exe`, a single self-contained file you can copy anywhere.
-
-For development: `dotnet run --project src\PDFPlus`.
-
-## Installer (MSI)
+Requires the .NET 8 SDK. PDFPlus ships as an MSI; there is no separate portable build.
 
 ```powershell
 .\build-installer.ps1
 ```
 
-This produces `dist\PDFPlus-1.1.0-x64.msi` (built with [WiX Toolset 5](https://wixtoolset.org), MS-RL, restored from NuGet).
+This produces `dist\PDFPlus-1.1.1-x64.msi` (built with [WiX Toolset 5](https://wixtoolset.org), MS-RL, restored from NuGet).
 
 - Installs for all users into Program Files, with a Start menu shortcut and an Add/Remove Programs entry
 - Registers PDFPlus for PDFs under "Open with" and Settings → Default apps (Windows doesn't let installers
   take over the default app, so pick PDFPlus there if you want it to open PDFs on double-click)
 - Installing a newer version upgrades in place; uninstalling keeps your settings in `%APPDATA%\PDFPlus`
-- Silent install: `msiexec /i PDFPlus-1.1.0-x64.msi /qn`, add `DESKTOP_SHORTCUT=1` for a desktop shortcut
+- Silent install: `msiexec /i PDFPlus-1.1.1-x64.msi /qn`, add `DESKTOP_SHORTCUT=1` for a desktop shortcut
 
-The installed copy keeps its native libraries beside the exe instead of unpacking them, so it starts a little faster
-than the portable exe. Both builds are otherwise identical.
+PDFPlus installs as ordinary files rather than one packed single-file exe, which is the difference between
+opening in about eight seconds and opening in about 0.6. Windows scans a large opaque binary every time it runs;
+as separate files the runtime is mapped straight from disk. The MSI compresses them, so the download is the same
+size either way. See the note in `PDFPlus.csproj` before reaching for `PublishSingleFile`.
+
+For development: `dotnet run --project src\PDFPlus`.
 
 ## Updates
 
@@ -109,10 +103,11 @@ then uses what it read for selection, copy and find. This runs on your computer;
 It needs an OCR language pack, which Windows installs with most display languages. If yours is missing, add it
 under Settings → Time & language → Language & region → your language → Language options.
 
-## Portable settings
+## Settings
 
-Settings (theme, recent files, saved signatures) are stored in `%APPDATA%\PDFPlus`. To keep them next to the exe
-instead (e.g. on a USB stick), create an empty file named `PDFPlus.settings.json` beside `PDFPlus.exe`.
+Settings (theme, recent files, saved signatures) are stored in `%APPDATA%\PDFPlus`, and uninstalling leaves them
+alone. If an empty `PDFPlus.settings.json` sits beside `PDFPlus.exe`, they are kept there instead; that needs a
+writable folder, so it does nothing for the usual Program Files install.
 
 ## Keyboard shortcuts
 
@@ -137,10 +132,24 @@ instead (e.g. on a USB stick), create an empty file named `PDFPlus.settings.json
 python tools\make-sample-pdf.py tests\sample.pdf
 # tests\edit-sample.pdf: print tools\make-edit-sample.html with Edge (command inside the file)
 python tools\make-unmapped-text-pdf.py tests\unmapped-text.pdf   # a PDF whose text copies as gibberish
+# run these from the build output, e.g. artifacts\installer\publish
 PDFPlus.exe --selftest tests\sample.pdf out   # engine checks, see out\selftest.log
 PDFPlus.exe --uitest tests\sample.pdf out     # renders UI screenshots off-screen
 PDFPlus.exe --textcheck file.pdf out          # what the text layer says vs what OCR reads, see out\textcheck.log
 PDFPlus.exe --updatecheck                     # what the update check finds, see %TEMP%\PDFPlus\updatecheck.log
+```
+
+## Startup timing
+
+Every run writes `%TEMP%\PDFPlus\startup.log`: a breakdown of where the time went, measured from when the
+process was created rather than from the first line of managed code, so packaging costs show up instead of
+hiding. It is the first place to look when someone says PDFPlus is slow to open.
+
+```
+runtime start, before Main                     130      130
+...
+window shown                                   504      172
+total                                          634
 ```
 
 ## Licenses

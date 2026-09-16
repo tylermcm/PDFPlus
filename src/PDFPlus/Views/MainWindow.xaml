@@ -250,8 +250,8 @@
             <!-- Documents -->
             <Grid x:Name="DocumentHost" Grid.Row="2" />
 
-            <!-- Home: shown when no document tab is active -->
-            <views:HomeView x:Name="Home" Grid.Row="2" />
+            <!-- Home: shown when no document tab is active. Built on first use; see MainWindow.Home. -->
+            <Decorator x:Name="HomeHost" Grid.Row="2" />
         </Grid>
     </Border>
 </Window>

@@ -4,7 +4,7 @@
   and registration as a PDF app ("Open with" and Settings > Default apps). Windows doesn't let installers
   make themselves the default PDF app; users choose that in Settings.
 
-  Silent install:  msiexec /i PDFPlus-1.1.0-x64.msi /qn   (add DESKTOP_SHORTCUT=1 for a desktop shortcut)
+  Silent install:  msiexec /i PDFPlus-1.1.1-x64.msi /qn   (add DESKTOP_SHORTCUT=1 for a desktop shortcut)
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
@@ -50,7 +50,12 @@
       <Directory Id="INSTALLFOLDER" Name="PDFPlus" />
     </StandardDirectory>
 
-    <!-- The self-contained app: one exe plus the native libraries it loads. build-installer.ps1 checks this list is complete. -->
+    <!--
+      The installed build ships as ordinary files rather than one packed single-file exe. Windows scans a large
+      opaque binary on every launch, which cost around seven seconds of startup; as separate files, the runtime
+      is mapped straight from disk and startup drops to well under a second. The MSI compresses them anyway, so
+      the download is a similar size either way. build-installer.ps1 sanity-checks the publish output.
+    -->
     <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
       <Component>
         <File Id="PDFPlusExe" Source="$(var.PublishDir)PDFPlus.exe">
@@ -58,24 +63,9 @@
                     WorkingDirectory="INSTALLFOLDER" Advertise="no" />
         </File>
       </Component>
-      <Component>
-        <File Source="$(var.PublishDir)pdfium.dll" />
-      </Component>
-      <Component>
-        <File Source="$(var.PublishDir)D3DCompiler_47_cor3.dll" />
-      </Component>
-      <Component>
-        <File Source="$(var.PublishDir)PenImc_cor3.dll" />
-      </Component>
-      <Component>
-        <File Source="$(var.PublishDir)PresentationNative_cor3.dll" />
-      </Component>
-      <Component>
-        <File Source="$(var.PublishDir)vcruntime140_cor3.dll" />
-      </Component>
-      <Component>
-        <File Source="$(var.PublishDir)wpfgfx_cor3.dll" />
-      </Component>
+      <Files Include="$(var.PublishDir)**">
+        <Exclude Files="$(var.PublishDir)PDFPlus.exe" />
+      </Files>
     </ComponentGroup>
 
     <!-- Optional desktop shortcut (DESKTOP_SHORTCUT=1). In a per-machine install this is the all-users desktop. -->

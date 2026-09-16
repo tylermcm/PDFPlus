@@ -59,21 +59,12 @@ public partial class MainWindow : Window
     /// <summary>An update the user asked to install; started once the window has finished closing.</summary>
     private string? _pendingInstaller;
 
-    public MainWindow()
+    public MainWindow(bool deferHome = false)
     {
-        InitializeComponent();
+        DeferHome = deferHome;
+        Timeline.Measure("  xaml parsed", InitializeComponent);
         TabStrip.ItemsSource = _tabs;
         LogoImage.Source = AppIcon.Get(32);
-        Home.OpenRequested += async (_, path) =>
-        {
-            if (path == null) await OpenWithDialogAsync();
-            else await OpenFileAsync(path);
-        };
-        Home.ToolRequested += (_, request) => RunHomeTool(request);
-        Home.CombineRequested += (_, _) => CombineFiles();
-        Home.ImagesToPdfRequested += (_, files) => CreatePdfFromImages(files);
-        Home.AboutRequested += (_, _) => ShowAbout();
-        Home.ShortcutsRequested += (_, _) => ShowShortcuts();
         Icon = AppIcon.Get(256);
 
         var settings = AppSettings.Current;
@@ -90,11 +81,50 @@ public partial class MainWindow : Window
 
         Loaded += (_, _) => _ = CheckForUpdatesAtStartupAsync();
 
+        Timeline.Mark("  window wired up");
         UpdateWindowStateChrome();
-        BuildAnnotationOptions();
-        RefreshRecent();
+        Timeline.Measure("  annotation options built", BuildAnnotationOptions);
+        Timeline.Measure("  recent files listed", RefreshRecent);
         UpdateChrome();
     }
+
+    private HomeView? _home;
+
+    /// <summary>
+    /// The Home screen, built the first time it is actually shown. Parsing its XAML was the single largest
+    /// step between launching and the window appearing, and opening a PDF from Explorer never shows it.
+    /// Use <see cref="_home"/> directly where Home should not be brought into being just to be asked about.
+    /// </summary>
+    /// <summary>
+    /// Set while the app is starting with files to open. Home is the most expensive thing built during
+    /// startup, and when a document is on its way it would be shown for a moment and never looked at.
+    /// </summary>
+    internal bool DeferHome { get; set; }
+
+    internal HomeView Home
+    {
+        get
+        {
+            if (_home != null) return _home;
+
+            _home = new HomeView();
+            _home.OpenRequested += async (_, path) =>
+            {
+                if (path == null) await OpenWithDialogAsync();
+                else await OpenFileAsync(path);
+            };
+            _home.ToolRequested += (_, request) => RunHomeTool(request);
+            _home.CombineRequested += (_, _) => CombineFiles();
+            _home.ImagesToPdfRequested += (_, files) => CreatePdfFromImages(files);
+            _home.AboutRequested += (_, _) => ShowAbout();
+            _home.ShortcutsRequested += (_, _) => ShowShortcuts();
+            HomeHost.Child = _home;
+            return _home;
+        }
+    }
+
+    /// <summary>Re-applies the toolbar and Home visibility; used after startup finishes opening its files.</summary>
+    internal void RefreshChrome() => UpdateChrome();
 
     private DocumentView? ActiveView => _active?.View;
 
@@ -130,7 +160,14 @@ public partial class MainWindow : Window
     private void UpdateChrome()
     {
         var tab = _active;
-        Home.Visibility = tab == null ? Visibility.Visible : Visibility.Collapsed;
+        if (tab == null)
+        {
+            if (!DeferHome) Home.Visibility = Visibility.Visible;
+        }
+        else if (_home != null)
+        {
+            _home.Visibility = Visibility.Collapsed;
+        }
         HomeButton.IsChecked = tab == null;
         Toolbar.Visibility = tab == null ? Visibility.Collapsed : Visibility.Visible;
         Title = tab == null ? "PDFPlus" : $"{tab.Title} - PDFPlus";
@@ -336,10 +373,11 @@ public partial class MainWindow : Window
                 Mouse.OverrideCursor = Cursors.AppStarting;
                 var document = await PdfDocument.OpenAsync(fullPath, password);
                 Mouse.OverrideCursor = null;
-                AddTab(document);
+                Timeline.Mark("document parsed");
+                Timeline.Measure("tab added", () => AddTab(document));
                 AppSettings.Current.AddRecent(fullPath);
-                RefreshRecent();
-                ResumeAtLastPage(fullPath);
+                Timeline.Measure("recent list refreshed", RefreshRecent);
+                Timeline.Measure("resumed at last page", () => ResumeAtLastPage(fullPath));
                 return;
             }
             catch (PdfPasswordRequiredException ex)
@@ -475,7 +513,7 @@ public partial class MainWindow : Window
 
     private void RefreshRecent()
     {
-        if (Home.IsVisible) Home.Refresh();
+        if (_home is { IsVisible: true } home) home.Refresh();
     }
 
     // ---------------------------------------------------------------- home

@@ -13,7 +13,7 @@
     <RootNamespace>PDFPlus</RootNamespace>
     <AssemblyName>PDFPlus</AssemblyName>
     <Product>PDFPlus</Product>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <Copyright>Free forever. No subscriptions.</Copyright>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\PDFPlus.ico</ApplicationIcon>
@@ -23,11 +23,12 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
-  <!-- Portable build: one self-contained exe, no installer, no runtime needed. -->
+  <!--
+    Shipping build. Deliberately NOT PublishSingleFile: Windows scans a large opaque binary on every launch,
+    which cost around seven seconds of startup. As ordinary files the runtime is mapped straight from disk and
+    PDFPlus opens in about 0.6 seconds. The MSI compresses them, so the download is the same size either way.
+  -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <PublishReadyToRun>true</PublishReadyToRun>
     <DebugType>none</DebugType>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
