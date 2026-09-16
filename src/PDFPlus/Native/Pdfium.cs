@@ -105,6 +105,8 @@ internal static unsafe class Pdfium
     [DllImport(Lib)] public static extern int FPDFText_CountChars(IntPtr textPage);
     [DllImport(Lib)] public static extern uint FPDFText_GetUnicode(IntPtr textPage, int index);
     [DllImport(Lib)] public static extern int FPDFText_GetCharIndexAtPos(IntPtr textPage, double x, double y, double xTolerance, double yTolerance);
+    // Note PDFium's parameter order here: left, right, bottom, top (not the left/top/right/bottom used by GetRect).
+    [DllImport(Lib)] public static extern int FPDFText_GetCharBox(IntPtr textPage, int index, double* left, double* right, double* bottom, double* top);
     [DllImport(Lib)] public static extern int FPDFText_GetText(IntPtr textPage, int startIndex, int count, ushort* result);
     [DllImport(Lib)] public static extern int FPDFText_CountRects(IntPtr textPage, int startIndex, int count);
     [DllImport(Lib)] public static extern int FPDFText_GetRect(IntPtr textPage, int rectIndex, double* left, double* top, double* right, double* bottom);

@@ -44,6 +44,14 @@ public sealed class AppSettings
     public string InkColor { get; set; } = "#000000";
     public string AnnotationColor { get; set; } = "#FFD400";
     public double AnnotationWidth { get; set; } = 2;
+    /// <summary>
+    /// Look for a newer release on GitHub at startup. This is the only thing PDFPlus ever sends over the
+    /// network, it carries nothing about the user or their files, and it can be turned off in the More menu.
+    /// </summary>
+    public bool CheckForUpdates { get; set; } = true;
+    /// <summary>A version the user chose to skip, so the same one isn't offered again.</summary>
+    public string SkippedVersion { get; set; } = "";
+    public DateTime LastUpdateCheck { get; set; }
     public double WindowWidth { get; set; } = 1280;
     public double WindowHeight { get; set; } = 860;
     public bool WindowMaximized { get; set; }

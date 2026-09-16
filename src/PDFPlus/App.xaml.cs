@@ -11,17 +11,29 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
-        if (e.Args.Length >= 3 && e.Args[0] is "--selftest" or "--uitest")
+        if (e.Args.Length >= 3 && e.Args[0] is "--selftest" or "--uitest" or "--textcheck")
         {
             // Development test modes; they never touch the user's saved settings.
             base.OnStartup(e);
             AppSettings.Persist = false;
             ThemeManager.Apply("Light");
             RenderService.Start(Dispatcher);
-            var uiTest = e.Args[0] == "--uitest";
-            Dispatcher.BeginInvoke(async () => Shutdown(uiTest
-                ? await UiTest.RunAsync(e.Args[1], e.Args[2])
-                : await SelfTest.RunAsync(e.Args[1], e.Args[2])));
+            var mode = e.Args[0];
+            Dispatcher.BeginInvoke(async () => Shutdown(mode switch
+            {
+                "--uitest" => await UiTest.RunAsync(e.Args[1], e.Args[2]),
+                "--textcheck" => await TextCheck.RunAsync(e.Args[1], e.Args[2]),
+                _ => await SelfTest.RunAsync(e.Args[1], e.Args[2]),
+            }));
+            return;
+        }
+
+        if (e.Args.Length >= 1 && e.Args[0] == "--updatecheck")
+        {
+            // Development check of the release plumbing; writes %TEMP%\PDFPlus\updatecheck.log.
+            base.OnStartup(e);
+            AppSettings.Persist = false;
+            Dispatcher.BeginInvoke(async () => Shutdown(await UpdateCheckReport.RunAsync()));
             return;
         }
 

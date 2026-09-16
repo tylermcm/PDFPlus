@@ -56,6 +56,8 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<DocumentTab> _tabs = new();
     private DocumentTab? _active;
     private DocumentTab? _tabDragTab;
+    /// <summary>An update the user asked to install; started once the window has finished closing.</summary>
+    private string? _pendingInstaller;
 
     public MainWindow()
     {
@@ -85,6 +87,8 @@ public partial class MainWindow : Window
         DragOver += OnWindowDragOver;
         Drop += OnWindowDrop;
         Closing += OnWindowClosing;
+
+        Loaded += (_, _) => _ = CheckForUpdatesAtStartupAsync();
 
         UpdateWindowStateChrome();
         BuildAnnotationOptions();
@@ -424,6 +428,17 @@ public partial class MainWindow : Window
             settings.WindowHeight = bounds.Height;
         }
         settings.Save();
+
+        // The installer replaces the files this process is running from, so it only starts once we're on the way out.
+        if (_pendingInstaller is not { } installer) return;
+        try
+        {
+            UpdateService.Launch(installer);
+        }
+        catch (Exception ex)
+        {
+            Dialogs.Error(null, "The update couldn't be started", $"{ex.Message}\n\nThe file is at {installer}.");
+        }
     }
 
     private void CombineFiles()
@@ -981,6 +996,7 @@ public partial class MainWindow : Window
             if (isProtected) menu.Items.Add(DocumentView.MenuItemFor("Remove password…", "", view.RemovePassword));
             menu.Items.Add(DocumentView.MenuItemFor("Export pages as images…", "", view.ExportImages));
             menu.Items.Add(DocumentView.MenuItemFor("Save compressed copy…", "", view.CompressCopy));
+            menu.Items.Add(DocumentView.MenuItemFor("Read text with OCR…", "", () => _ = view.ReadWholeDocumentAsync()));
         }
         menu.Items.Add(new Separator());
 
@@ -991,18 +1007,114 @@ public partial class MainWindow : Window
         theme.Items.Add(DocumentView.MenuItemFor("Dark", null, () => SetTheme("Dark"), isChecked: current == "Dark"));
         menu.Items.Add(theme);
 
+        menu.Items.Add(new Separator());
+        menu.Items.Add(DocumentView.MenuItemFor("Check for updates…", "", () => _ = CheckForUpdatesNowAsync()));
+        menu.Items.Add(DocumentView.MenuItemFor("Check for updates automatically", null, ToggleAutomaticUpdates,
+            isChecked: AppSettings.Current.CheckForUpdates));
         menu.Items.Add(DocumentView.MenuItemFor("Keyboard shortcuts", "", ShowShortcuts));
         menu.Items.Add(DocumentView.MenuItemFor("About PDFPlus", "", ShowAbout));
         menu.Closed += (_, _) => UpdateChrome();
         menu.IsOpen = true;
     }
 
+    // ---------------------------------------------------------------- updates
+
+    /// <summary>
+    /// The quiet check when the app starts: at most once a day, nothing on screen unless there is a new
+    /// version, and silent when the network isn't reachable.
+    /// </summary>
+    private async Task CheckForUpdatesAtStartupAsync()
+    {
+        var settings = AppSettings.Current;
+        if (!settings.CheckForUpdates) return;
+        if (DateTime.UtcNow - settings.LastUpdateCheck < UpdateService.CheckInterval) return;
+
+        var result = await UpdateService.CheckAsync(CancellationToken.None);
+        if (result.Status == UpdateCheckStatus.Failed) return;
+
+        settings.LastUpdateCheck = DateTime.UtcNow;
+        settings.Save();
+
+        if (result.Update is not { } update) return;
+        if (settings.SkippedVersion == update.Version.ToString()) return;
+        OfferUpdate(update);
+    }
+
+    /// <summary>"Check for updates" from the menu: always looks, and always reports what it found.</summary>
+    private async Task CheckForUpdatesNowAsync()
+    {
+        var result = await UpdateService.CheckAsync(CancellationToken.None);
+        var settings = AppSettings.Current;
+        if (result.Status != UpdateCheckStatus.Failed)
+        {
+            settings.LastUpdateCheck = DateTime.UtcNow;
+            settings.Save();
+        }
+
+        switch (result.Status)
+        {
+            case UpdateCheckStatus.Failed:
+                UpdateDialog.ShowCheckFailed(this);
+                break;
+            case UpdateCheckStatus.UpToDate:
+                UpdateDialog.ShowUpToDate(this);
+                break;
+            // Asking for an update explicitly overrides having skipped this version earlier.
+            case UpdateCheckStatus.UpdateAvailable when result.Update is { } update:
+                OfferUpdate(update);
+                break;
+        }
+    }
+
+    private void OfferUpdate(UpdateInfo update)
+    {
+        var outcome = UpdateDialog.Show(this, update);
+        var settings = AppSettings.Current;
+
+        if (outcome.Error is { } error)
+        {
+            Dialogs.Error(this, "The update couldn't be downloaded",
+                $"{error}\n\nYou can download it yourself from {UpdateService.ReleasesUrl}.");
+            return;
+        }
+
+        if (outcome.Skip)
+        {
+            settings.SkippedVersion = update.Version.ToString();
+            settings.Save();
+            return;
+        }
+
+        if (outcome.InstallerPath is not { } installer) return;
+
+        if (Dialogs.Ask(this, "Install the update now?",
+                "PDFPlus will close so Windows can install the new version. " +
+                "Any unsaved changes are offered for saving first.",
+                "Close and install", null) != AskResult.Primary) return;
+
+        // OnWindowClosing starts the installer, but only once it knows the close wasn't cancelled.
+        _pendingInstaller = installer;
+        Close();
+        _pendingInstaller = null;
+    }
+
+    private void ToggleAutomaticUpdates()
+    {
+        var settings = AppSettings.Current;
+        settings.CheckForUpdates = !settings.CheckForUpdates;
+        settings.SkippedVersion = "";
+        settings.Save();
+    }
+
     private void OnAboutClick(object sender, RoutedEventArgs e) => ShowAbout();
 
-    private void ShowAbout() => Dialogs.Info(this, "PDFPlus 1.0",
+    private void ShowAbout() => Dialogs.Info(this, $"PDFPlus {UpdateService.CurrentVersion.ToString(3)}",
         "A fast, free PDF viewer and editor.\n\n" +
-        "No accounts, no subscriptions, no telemetry. Your files never leave this computer.\n\n" +
-        "PDF rendering by PDFium, the engine behind Chrome's PDF viewer (BSD-3-Clause license).",
+        "No accounts, no subscriptions, no telemetry. Your files never leave this computer. " +
+        "The only thing PDFPlus sends over the network is a check for a newer version, " +
+        "which you can turn off in this menu.\n\n" +
+        "PDF rendering by PDFium, the engine behind Chrome's PDF viewer (BSD-3-Clause license). " +
+        "Text in pictures is read by the OCR engine built into Windows, on this computer.",
         "About PDFPlus");
 
     private void ShowShortcuts() => ShortcutsDialog.Show(this);

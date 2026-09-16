@@ -98,6 +98,8 @@ public sealed unsafe partial class PdfDocument : IDisposable
         FilePath = path;
         _untitledName = $"Untitled {++_untitledCounter}.pdf";
         _self = GCHandle.Alloc(this);
+        PageContentChanged += (_, index) => ForgetRecoveredText(index);
+        PagesChanged += (_, _) => ForgetAllRecoveredText();
         lock (PdfLibrary.Sync)
         {
             AttachFormLocked();
@@ -381,6 +383,7 @@ public sealed unsafe partial class PdfDocument : IDisposable
     {
         lock (PdfLibrary.Sync)
         {
+            if (_recognized.TryGetValue(index, out var recovered)) return recovered.Count;
             var textPage = TextPageLocked(index);
             return textPage == IntPtr.Zero ? 0 : FPDFText_CountChars(textPage);
         }
@@ -390,6 +393,7 @@ public sealed unsafe partial class PdfDocument : IDisposable
     {
         lock (PdfLibrary.Sync)
         {
+            if (_recognized.TryGetValue(index, out var recovered)) return recovered.IndexAt(pagePoint, tolerance);
             var textPage = TextPageLocked(index);
             if (textPage == IntPtr.Zero) return -1;
             var result = FPDFText_GetCharIndexAtPos(textPage, pagePoint.X, pagePoint.Y, tolerance, tolerance);
@@ -401,6 +405,7 @@ public sealed unsafe partial class PdfDocument : IDisposable
     {
         lock (PdfLibrary.Sync)
         {
+            if (_recognized.TryGetValue(index, out var recovered)) return recovered.Rects(start, count);
             var textPage = TextPageLocked(index);
             return textPage == IntPtr.Zero || count <= 0 ? [] : RectsLocked(textPage, start, count);
         }
@@ -425,6 +430,7 @@ public sealed unsafe partial class PdfDocument : IDisposable
         if (count <= 0) return "";
         lock (PdfLibrary.Sync)
         {
+            if (_recognized.TryGetValue(index, out var recovered)) return recovered.Slice(start, count);
             var textPage = TextPageLocked(index);
             if (textPage == IntPtr.Zero) return "";
             var buffer = new ushort[count + 1];
@@ -441,6 +447,7 @@ public sealed unsafe partial class PdfDocument : IDisposable
     {
         lock (PdfLibrary.Sync)
         {
+            if (_recognized.TryGetValue(index, out var recovered)) return recovered.WordAt(charIndex);
             var textPage = TextPageLocked(index);
             if (textPage == IntPtr.Zero) return (charIndex, 1);
             var total = FPDFText_CountChars(textPage);
@@ -464,6 +471,13 @@ public sealed unsafe partial class PdfDocument : IDisposable
             lock (PdfLibrary.Sync)
             {
                 if (_disposed || i >= _sizes.Length) break;
+                if (_recognized.TryGetValue(i, out var recovered))
+                {
+                    foreach (var (start, length) in recovered.Find(query, matchCase, wholeWord))
+                        hits.Add(new SearchHit(i, start, length, recovered.Rects(start, length)));
+                    pageDone?.Invoke(i);
+                    continue;
+                }
                 var textPage = TextPageLocked(i);
                 if (textPage == IntPtr.Zero) continue;
                 var handle = FPDFText_FindStart(textPage, query, flags, 0);

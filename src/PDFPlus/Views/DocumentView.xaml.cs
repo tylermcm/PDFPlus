@@ -109,6 +109,7 @@ public partial class DocumentView : UserControl, IDisposable
         Annotations.Attach(View, document);
         Annotations.SelectionChanged += (_, _) => RaiseStatus();
         View.PreviewPageClick = (hit, clicks) => Annotations.TrySelectAt(hit, clicks);
+        View.TextRecoveryNeeded += (_, page) => _ = RecoverTextAsync(page, announce: true);
         Edits.Attach(View, document);
         Edits.Message += (_, message) => ShowToast(message);
         Edits.SelectionChanged += (_, _) => RaiseStatus();
@@ -129,6 +130,8 @@ public partial class DocumentView : UserControl, IDisposable
         {
             SyncThumbnailSelection();
             RaiseStatus();
+            // Get a head start on pages that need OCR, so selecting on them feels the same as anywhere else.
+            if (View.Tool == ViewTool.Select) _ = RecoverTextAsync(View.CurrentPageIndex, announce: false);
         };
         View.ZoomChanged += (_, _) => RaiseStatus();
         View.LinkActivated += (_, target) => Navigate(target);
@@ -574,7 +577,11 @@ public partial class DocumentView : UserControl, IDisposable
                 Add($"Find “{text}”", "", () => { ShowSearch(); FindNext(false); });
         }
         if (hit is { } selectTarget)
+        {
             Add("Select all text on page", "", () => View.SelectAllOnPage(selectTarget.PageIndex), "Ctrl+A");
+            if (TextRecovery.IsAvailable && !Document.HasRecoveredText(selectTarget.PageIndex))
+                Add("Read text with OCR", "", () => _ = RecoverTextAsync(selectTarget.PageIndex, announce: true, force: true));
+        }
 
         AddSeparator();
         Add("Zoom in", "", View.ZoomIn, "Ctrl++");
@@ -589,6 +596,57 @@ public partial class DocumentView : UserControl, IDisposable
             Add("Rotate page left", "", () => Document.RotatePages([rotateTarget.PageIndex], -1));
         }
         return menu;
+    }
+
+    // ---------------------------------------------------------------- text recovery (OCR)
+
+    /// <summary>
+    /// Reads a page with the Windows OCR engine when the page's own text layer is missing or unusable, so that
+    /// selection, copy and find work on it. Pages that are already readable return immediately, unless forced.
+    /// </summary>
+    private async Task RecoverTextAsync(int page, bool announce, bool force = false)
+    {
+        if ((uint)page >= (uint)Document.PageCount) return;
+        if (!force && !Document.NeedsTextRecovery(page)) return;
+        if (!TextRecovery.IsAvailable)
+        {
+            if (announce) ShowToast("This page has no readable text, and Windows OCR isn't available on this PC");
+            return;
+        }
+
+        if (announce) ShowToast("Reading the text on this page…");
+        var recovered = await TextRecovery.EnsureAsync(Document, page, force);
+        if (!announce) return;
+        ShowToast(recovered
+            ? "Text read from the page   ·   drag to select it"
+            : "Couldn't find any text on this page");
+    }
+
+    /// <summary>Runs OCR over every page, for documents the automatic check can't help with page by page.</summary>
+    public async Task ReadWholeDocumentAsync()
+    {
+        if (!TextRecovery.IsAvailable)
+        {
+            Dialogs.Info(Window.GetWindow(this), "OCR isn't available",
+                "Reading text from pictures needs the Windows OCR engine, which isn't installed on this PC. " +
+                "You can add it in Settings → Time & language → Language & region, under the optional features of your language.");
+            return;
+        }
+
+        var total = Document.PageCount;
+        var progress = new Progress<int>(done => ToastText.Text = $"Reading text… page {done} of {total}");
+        ShowToast($"Reading text… page 0 of {total}");
+        try
+        {
+            var recovered = await TextRecovery.EnsureAllAsync(Document, force: true, progress, CancellationToken.None);
+            ShowToast(recovered > 0
+                ? $"Read text from {recovered} page{(recovered == 1 ? "" : "s")}"
+                : "No text was found in this document");
+        }
+        catch (Exception ex)
+        {
+            ShowToast($"Couldn't read the text: {ex.Message}");
+        }
     }
 
     private void MarkupSelection(MarkupKind kind)

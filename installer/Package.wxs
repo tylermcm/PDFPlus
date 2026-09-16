@@ -4,7 +4,7 @@
   and registration as a PDF app ("Open with" and Settings > Default apps). Windows doesn't let installers
   make themselves the default PDF app; users choose that in Settings.
 
-  Silent install:  msiexec /i PDFPlus-1.0.0-x64.msi /qn   (add DESKTOP_SHORTCUT=1 for a desktop shortcut)
+  Silent install:  msiexec /i PDFPlus-1.1.0-x64.msi /qn   (add DESKTOP_SHORTCUT=1 for a desktop shortcut)
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">

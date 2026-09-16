@@ -2,7 +2,10 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- The Windows 10 flavour of the TFM brings in Windows.Media.Ocr, used to read pages whose text layer is
+         unusable. SupportedOSPlatformVersion stays at 1809 so the app still runs where OCR isn't available. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -10,7 +13,7 @@
     <RootNamespace>PDFPlus</RootNamespace>
     <AssemblyName>PDFPlus</AssemblyName>
     <Product>PDFPlus</Product>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Copyright>Free forever. No subscriptions.</Copyright>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\PDFPlus.ico</ApplicationIcon>

@@ -4,6 +4,8 @@ dist/
 artifacts/
 # Large generated fixture: python tools/make-image-pdf.py tests/images.pdf
 tests/images.pdf
+# Generated fixture; embeds a Windows font: python tools/make-unmapped-text-pdf.py tests/unmapped-text.pdf
+tests/unmapped-text.pdf
 .vs/
 *.user
 *.suo

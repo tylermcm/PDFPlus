@@ -19,6 +19,9 @@ A fast, portable PDF viewer and editor for Windows. No account, no subscription.
 - Page thumbnails, bookmarks (outline), clickable links (web links ask before opening)
 - Find with match case / whole word, highlighted results, next/previous
 - Text selection and copy (drag, double-click a word, Ctrl+A for the page)
+- Selecting text on scanned pages, and on pages whose fonts carry no character map (where other viewers copy
+  gibberish), by reading the page with the OCR engine built into Windows. It happens by itself when a page
+  needs it; you can also force it from the right-click menu or read a whole document from the ⋯ menu
 - Password-protected PDFs, printing, light and dark themes
 
 **Page tools**
@@ -45,6 +48,8 @@ A fast, portable PDF viewer and editor for Windows. No account, no subscription.
 - Password protect with AES-256, choose whether printing, copying and editing are allowed; change or remove the password
 - Export pages as PNG or JPG at 72/150/300 dpi
 - Save a compressed copy (large images are downsampled; text stays sharp)
+- Read text with OCR across the whole document, for scans and for PDFs whose text copies as gibberish
+- Check for updates, and turn the automatic check on or off
 
 **Fill & sign** (toolbar → Fill & Sign)
 - Fill interactive PDF forms (text fields, checkboxes, radio buttons, dropdowns)
@@ -70,16 +75,39 @@ For development: `dotnet run --project src\PDFPlus`.
 .\build-installer.ps1
 ```
 
-This produces `dist\PDFPlus-1.0.0-x64.msi` (built with [WiX Toolset 5](https://wixtoolset.org), MS-RL, restored from NuGet).
+This produces `dist\PDFPlus-1.1.0-x64.msi` (built with [WiX Toolset 5](https://wixtoolset.org), MS-RL, restored from NuGet).
 
 - Installs for all users into Program Files, with a Start menu shortcut and an Add/Remove Programs entry
 - Registers PDFPlus for PDFs under "Open with" and Settings → Default apps (Windows doesn't let installers
   take over the default app, so pick PDFPlus there if you want it to open PDFs on double-click)
 - Installing a newer version upgrades in place; uninstalling keeps your settings in `%APPDATA%\PDFPlus`
-- Silent install: `msiexec /i PDFPlus-1.0.0-x64.msi /qn`, add `DESKTOP_SHORTCUT=1` for a desktop shortcut
+- Silent install: `msiexec /i PDFPlus-1.1.0-x64.msi /qn`, add `DESKTOP_SHORTCUT=1` for a desktop shortcut
 
 The installed copy keeps its native libraries beside the exe instead of unpacking them, so it starts a little faster
 than the portable exe. Both builds are otherwise identical.
+
+## Updates
+
+PDFPlus checks the [releases page](https://github.com/tylermcm/PDFPlus/releases) for a newer version when it
+starts, at most once a day, and offers to download and install it. You can skip a version, or turn the check
+off entirely under ⋯ → "Check for updates automatically"; ⋯ → "Check for updates" looks straight away.
+
+The check is a plain request for the public list of releases. Nothing about you, your settings or your files
+is sent, and nothing else in PDFPlus uses the network.
+
+For the check to work, a release needs a `.msi` (or `.exe`) attached whose filename contains the version,
+like `PDFPlus-1.2.3-x64.msi` — which is what `build-installer.ps1` produces. The release tag itself doesn't
+have to be a version number.
+
+## Reading text from pictures
+
+Some PDFs can't be selected or searched: scans hold pictures of words rather than words, and some generators
+embed fonts without the table that maps them back to letters, so the page looks perfect but copying it
+produces punctuation soup. PDFPlus notices both and reads those pages with the OCR engine built into Windows,
+then uses what it read for selection, copy and find. This runs on your computer; nothing is uploaded.
+
+It needs an OCR language pack, which Windows installs with most display languages. If yours is missing, add it
+under Settings → Time & language → Language & region → your language → Language options.
 
 ## Portable settings
 
@@ -108,8 +136,11 @@ instead (e.g. on a USB stick), create an empty file named `PDFPlus.settings.json
 ```powershell
 python tools\make-sample-pdf.py tests\sample.pdf
 # tests\edit-sample.pdf: print tools\make-edit-sample.html with Edge (command inside the file)
+python tools\make-unmapped-text-pdf.py tests\unmapped-text.pdf   # a PDF whose text copies as gibberish
 PDFPlus.exe --selftest tests\sample.pdf out   # engine checks, see out\selftest.log
 PDFPlus.exe --uitest tests\sample.pdf out     # renders UI screenshots off-screen
+PDFPlus.exe --textcheck file.pdf out          # what the text layer says vs what OCR reads, see out\textcheck.log
+PDFPlus.exe --updatecheck                     # what the update check finds, see %TEMP%\PDFPlus\updatecheck.log
 ```
 
 ## Licenses
