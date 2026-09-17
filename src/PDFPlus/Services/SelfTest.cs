@@ -190,6 +190,8 @@ internal static class SelfTest
 
             // ---- Home: images to PDF, previews
             ImagesToPdfTests(input, outputDirectory, Check);
+            await TextTestsAsync(outputDirectory, Check);
+            await DocxTestsAsync(input, outputDirectory, Check, log);
         }
         catch (Exception ex)
         {
@@ -367,6 +369,160 @@ internal static class SelfTest
             $"{preview.Image?.PixelWidth}x{preview.Image?.PixelHeight}, {preview.PageCount} pages");
         var locked = Path.Combine(outputDirectory, "protected.pdf");
         if (File.Exists(locked)) check("home preview: protected file", PdfThumbnail.Render(locked, 150, 200).IsProtected, "");
+    }
+
+    /// <summary>
+    /// Opening a text file and saving it again must give back the same bytes. The details that a naive
+    /// implementation silently changes are the ones checked here: the encoding, the byte order mark and
+    /// whether lines ended in CRLF or LF.
+    /// </summary>
+    private static async Task TextTestsAsync(string outputDirectory, Action<string, bool, string> check)
+    {
+        async Task RoundTrip(string name, byte[] original)
+        {
+            var path = Path.Combine(outputDirectory, name);
+            await File.WriteAllBytesAsync(path, original);
+            var document = await TextDocument.OpenAsync(path);
+            document.Save(path);
+            var saved = await File.ReadAllBytesAsync(path);
+            check($"text round trip: {name}", saved.SequenceEqual(original),
+                $"{original.Length} bytes in, {saved.Length} out");
+        }
+
+        var utf8 = new UTF8Encoding(false);
+        await RoundTrip("crlf.txt", utf8.GetBytes("first\r\nsecond\r\nthird"));
+        await RoundTrip("lf.txt", utf8.GetBytes("first\nsecond\nthird"));
+        await RoundTrip("unicode.txt", utf8.GetBytes("café — naïve\r\n你好"));
+        await RoundTrip("bom.txt", new UTF8Encoding(true).GetPreamble().Concat(utf8.GetBytes("with a byte order mark")).ToArray());
+        await RoundTrip("trailing-blank.txt", utf8.GetBytes("one\r\ntwo\r\n"));
+
+        // Rich text keeps its styling across a save and reopen.
+        var rtfPath = Path.Combine(outputDirectory, "styled.rtf");
+        await File.WriteAllTextAsync(rtfPath,
+            @"{\rtf1\ansi\deff0{\fonttbl{\f0 Calibri;}}\fs28 plain {\b bolded} plain\par}");
+        var rich = await TextDocument.OpenAsync(rtfPath);
+        check("rich text: opens", rich.Format == TextFormat.Rtf && rich.ToPlainText().Contains("bolded"), rich.ToPlainText().Trim());
+        rich.Save(rtfPath);
+        var reopened = await TextDocument.OpenAsync(rtfPath);
+        var bold = reopened.Content.Blocks.OfType<System.Windows.Documents.Paragraph>()
+            .SelectMany(paragraph => paragraph.Inlines)
+            .Any(inline => inline.FontWeight.ToOpenTypeWeight() >= 600);
+        check("rich text: bold survives a save", bold, reopened.ToPlainText().Trim());
+
+        check("text: only known extensions open here", !TextDocument.Handles("a.pdf") && TextDocument.Handles("a.TXT"), "");
+    }
+
+    /// <summary>
+    /// Reads the sample Word document, checks the things a reader has to get right, then writes it back out and
+    /// reads it again: what survives that trip is what a user's document would survive.
+    /// </summary>
+    private static async Task DocxTestsAsync(string input, string outputDirectory, Action<string, bool, string> check, StringBuilder log)
+    {
+        var source = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input))!, "sample.docx");
+        if (!File.Exists(source))
+        {
+            check("docx", false, "tests/sample.docx missing (python tools/make-docx-sample.py tests/sample.docx)");
+            return;
+        }
+
+        var document = await TextDocument.OpenAsync(source);
+        Describe("read", document);
+
+        // The footnote's words are kept at the end of the document rather than thrown away.
+        check("docx: footnote text is kept", document.ToPlainText().Contains("Figures are unaudited"),
+            string.Join(", ", document.Unsupported));
+
+        var saved = Path.Combine(outputDirectory, "docx-round-trip.docx");
+        document.Save(saved);
+        check("docx: writes a package Word can open", new FileInfo(saved).Length > 1500, $"{new FileInfo(saved).Length:N0} bytes");
+
+        var reopened = await TextDocument.OpenAsync(saved);
+        Describe("round trip", reopened);
+        check("docx: text survives the round trip",
+            Normalise(reopened.ToPlainText()) == Normalise(document.ToPlainText()), "");
+        return;
+
+        void Describe(string stage, TextDocument opened)
+        {
+            var blocks = opened.Content.Blocks.ToList();
+            var text = opened.ToPlainText();
+            var inlines = blocks.OfType<System.Windows.Documents.Paragraph>().SelectMany(p => p.Inlines)
+                .Concat(blocks.OfType<System.Windows.Documents.List>()
+                    .SelectMany(l => l.ListItems)
+                    .SelectMany(i => i.Blocks.OfType<System.Windows.Documents.Paragraph>())
+                    .SelectMany(p => p.Inlines))
+                .ToList();
+
+            check($"docx {stage}: paragraph text", text.Contains("Quarterly Report") && text.Contains("$4.2 million"),
+                text.Split('\n')[0]);
+            check($"docx {stage}: bold run", inlines.Any(i => i.FontWeight.ToOpenTypeWeight() >= 600), "");
+            check($"docx {stage}: underlined run", inlines.Any(i => i.TextDecorations?.Count > 0), "");
+
+            var lists = blocks.OfType<System.Windows.Documents.List>().ToList();
+            check($"docx {stage}: bullet and numbered lists",
+                lists.Any(l => l.MarkerStyle == System.Windows.TextMarkerStyle.Disc) &&
+                lists.Any(l => l.MarkerStyle == System.Windows.TextMarkerStyle.Decimal),
+                string.Join(", ", lists.Select(l => $"{l.MarkerStyle} x{l.ListItems.Count}")));
+
+            var table = blocks.OfType<System.Windows.Documents.Table>().FirstOrDefault();
+            var rows = table?.RowGroups.SelectMany(g => g.Rows).ToList();
+            check($"docx {stage}: table", rows is { Count: 3 } && rows[0].Cells.Count == 3,
+                rows == null ? "no table" : $"{rows.Count} rows x {rows[0].Cells.Count} cells");
+
+            var image = inlines.OfType<System.Windows.Documents.InlineUIContainer>()
+                .Select(c => c.Child).OfType<System.Windows.Controls.Image>().FirstOrDefault();
+            check($"docx {stage}: inline picture", image?.Source is System.Windows.Media.Imaging.BitmapSource { PixelWidth: > 1 },
+                image?.Source is System.Windows.Media.Imaging.BitmapSource bitmap ? $"{bitmap.PixelWidth}x{bitmap.PixelHeight}" : "none");
+
+            var heading = blocks.OfType<System.Windows.Documents.Paragraph>().FirstOrDefault();
+            check($"docx {stage}: heading is larger than body text", heading is { FontSize: >= 20 },
+                $"{heading?.FontSize}");
+
+            var link = inlines.OfType<System.Windows.Documents.Hyperlink>().FirstOrDefault();
+            check($"docx {stage}: hyperlink", link?.NavigateUri?.Host == "example.com", link?.NavigateUri?.ToString() ?? "none");
+
+            // A character style resolved through rStyle, which real documents lean on heavily.
+            var emphasised = inlines.OfType<System.Windows.Documents.Run>()
+                .FirstOrDefault(r => r.Text.Contains("a record"));
+            check($"docx {stage}: character style", emphasised?.FontStyle == System.Windows.FontStyles.Italic &&
+                emphasised.Foreground is System.Windows.Media.SolidColorBrush { Color.R: 0xC0 }, "");
+
+            // Caption is based on Heading2, so its colour has to come down the basedOn chain.
+            var caption = blocks.OfType<System.Windows.Documents.Paragraph>()
+                .FirstOrDefault(p => new System.Windows.Documents.TextRange(p.ContentStart, p.ContentEnd).Text.Contains("SMALL CAP"));
+            check($"docx {stage}: style inheritance through basedOn",
+                caption?.Foreground is System.Windows.Media.SolidColorBrush { Color.B: 0x96 }, "");
+
+            var spaced = blocks.OfType<System.Windows.Documents.Paragraph>()
+                .FirstOrDefault(p => new System.Windows.Documents.TextRange(p.ContentStart, p.ContentEnd).Text.Contains("generous spacing"));
+            check($"docx {stage}: paragraph spacing and indent",
+                spaced is { Margin.Left: > 40, Margin.Top: > 14 },
+                spaced == null ? "not found" : $"left {spaced.Margin.Left:0}, top {spaced.Margin.Top:0}");
+
+            var broken = blocks.FirstOrDefault(b => b.BreakPageBefore);
+            check($"docx {stage}: explicit page break", broken != null, "");
+            check($"docx {stage}: page size and margins",
+                Math.Abs(opened.Page.Width - 816) < 1 && Math.Abs(opened.Page.Margin.Left - 96) < 1,
+                $"{opened.Page.Width:0}x{opened.Page.Height:0}, margin {opened.Page.Margin.Left:0}");
+
+            var nested = blocks.OfType<System.Windows.Documents.List>().FirstOrDefault(l => l.Margin.Left > 20);
+            check($"docx {stage}: nested list is indented", nested is { Margin.Left: > 40 }, $"{nested?.Margin.Left ?? 0:0}");
+
+            var shaded = rows?[0].Cells[0].Background as System.Windows.Media.SolidColorBrush;
+            check($"docx {stage}: table header shading", shaded is { Color.R: 0xD9 }, shaded?.Color.ToString() ?? "none");
+
+            if (table != null)
+                log.AppendLine($"      docx {stage}: table columns=[{string.Join(", ", table.Columns.Select(c => $"{c.Width}"))}] " +
+                               $"rows=[{string.Join(", ", table.RowGroups.SelectMany(g => g.Rows).Select(r => $"{r.Cells.Count} cells spans {string.Join('/', r.Cells.Select(c => $"{c.ColumnSpan}x{c.RowSpan}"))}"))}]");
+
+            check($"docx {stage}: table column widths",
+                table?.Columns.Count == 3 && table.Columns[0].Width.Value > table.Columns[1].Width.Value,
+                table == null ? "no table" : string.Join("/", table.Columns.Select(c => $"{c.Width.Value:0}")));
+
+            log.AppendLine($"      docx {stage}: {blocks.Count} blocks, {text.Length} characters");
+        }
+
+        static string Normalise(string text) => string.Join(" ", text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
     private static BitmapSource RenderFull(PdfDocument doc, int page)

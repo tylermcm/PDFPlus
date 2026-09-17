@@ -1,6 +1,7 @@
 # PDFPlus
 
-A fast, portable PDF viewer and editor for Windows. No account, no subscription.
+A fast PDF viewer and editor for Windows, which also opens Word, rich text and plain text documents.
+No account, no subscription.
 
 ## Features
 
@@ -11,6 +12,16 @@ A fast, portable PDF viewer and editor for Windows. No account, no subscription.
 - Recent files with first-page previews, page counts and when you opened them; search, pin favorites to the top,
   switch between thumbnails and a list, open with a specific tool, show in folder, or remove from the list
 - The house button next to the tabs brings Home back while documents are open
+
+**Documents**
+- Opens `.docx`, `.rtf`, `.txt`, `.md`, `.log`, `.csv`, `.tsv`, `.ini`, `.json` and `.xml` in a tab beside your PDFs
+- Word documents come in with their headings, bold and colour, bulleted and numbered lists, tables, inline
+  pictures, hyperlinks and alignment, and can be edited and saved back as `.docx`
+- Plain text keeps its encoding, byte order mark and line endings, so saving a `.txt` gives back the same file
+- Rich documents get a full formatting toolbar: fonts, sizes, bold, italic, underline, colour, alignment and lists
+- Find and replace with match case, live match counts and wrap-around
+- Plain text files can't carry formatting, so the toolbar is disabled for them; save as `.rtf` or `.docx` to add it
+- Opening a Word document says up front what it uses that PDFPlus won't keep, and saving over it asks first
 
 **Viewing**
 - Tabs (open many PDFs at once; opening a PDF while PDFPlus is running adds a tab)
@@ -59,26 +70,35 @@ A fast, portable PDF viewer and editor for Windows. No account, no subscription.
 
 ## Build
 
-Requires the .NET 8 SDK. PDFPlus ships as an MSI; there is no separate portable build.
+Requires the .NET 8 SDK.
+
+To try a change, build into `dist\app` and run it without installing anything:
+
+```powershell
+.\run.ps1                     # add a file path to open it, or -NoBuild to just relaunch
+```
+
+That is the same layout the MSI installs, so startup and behaviour match a real install.
+For a debugger, `dotnet run --project src\PDFPlus`.
+
+PDFPlus ships as an MSI; there is no separate portable build.
 
 ```powershell
 .\build-installer.ps1
 ```
 
-This produces `dist\PDFPlus-1.1.1-x64.msi` (built with [WiX Toolset 5](https://wixtoolset.org), MS-RL, restored from NuGet).
+This produces `dist\PDFPlus-1.3.0-x64.msi` (built with [WiX Toolset 5](https://wixtoolset.org), MS-RL, restored from NuGet).
 
 - Installs for all users into Program Files, with a Start menu shortcut and an Add/Remove Programs entry
 - Registers PDFPlus for PDFs under "Open with" and Settings → Default apps (Windows doesn't let installers
   take over the default app, so pick PDFPlus there if you want it to open PDFs on double-click)
 - Installing a newer version upgrades in place; uninstalling keeps your settings in `%APPDATA%\PDFPlus`
-- Silent install: `msiexec /i PDFPlus-1.1.1-x64.msi /qn`, add `DESKTOP_SHORTCUT=1` for a desktop shortcut
+- Silent install: `msiexec /i PDFPlus-1.3.0-x64.msi /qn`, add `DESKTOP_SHORTCUT=1` for a desktop shortcut
 
 PDFPlus installs as ordinary files rather than one packed single-file exe, which is the difference between
 opening in about eight seconds and opening in about 0.6. Windows scans a large opaque binary every time it runs;
 as separate files the runtime is mapped straight from disk. The MSI compresses them, so the download is the same
 size either way. See the note in `PDFPlus.csproj` before reaching for `PublishSingleFile`.
-
-For development: `dotnet run --project src\PDFPlus`.
 
 ## Updates
 
@@ -120,7 +140,8 @@ writable folder, so it does nothing for the usual Program Files install.
 | Ctrl + / Ctrl -, Ctrl+wheel | Zoom |
 | Ctrl+0 / Ctrl+1 / Ctrl+2 | Fit page / Actual size / Fit width |
 | F4 | Toggle sidebar |
-| V / H | Select tool / Hand tool |
+| V / H | Select tool / Hand tool (PDFs) |
+| Ctrl+B / Ctrl+I / Ctrl+U | Bold / italic / underline (rich text) |
 | E | Edit text and images (Enter retypes the selected text, Del deletes it) |
 | Home / End, Space | First / last page, page down |
 | Del (in sidebar) | Delete selected pages |
@@ -132,6 +153,7 @@ writable folder, so it does nothing for the usual Program Files install.
 python tools\make-sample-pdf.py tests\sample.pdf
 # tests\edit-sample.pdf: print tools\make-edit-sample.html with Edge (command inside the file)
 python tools\make-unmapped-text-pdf.py tests\unmapped-text.pdf   # a PDF whose text copies as gibberish
+python tools\make-docx-sample.py tests\sample.docx             # a Word document covering what the reader handles
 # run these from the build output, e.g. artifacts\installer\publish
 PDFPlus.exe --selftest tests\sample.pdf out   # engine checks, see out\selftest.log
 PDFPlus.exe --uitest tests\sample.pdf out     # renders UI screenshots off-screen
@@ -151,6 +173,41 @@ runtime start, before Main                     130      130
 window shown                                   504      172
 total                                          634
 ```
+
+## Word documents
+
+PDFPlus reads a `.docx` for what it says, not for how Word lays it out. What comes across:
+
+- paragraph and character styles, resolved through their `basedOn` chains, so headings look like headings
+- bold, italic, underline, strikethrough, colour, highlighting, fonts, sizes and small capitals
+- paragraph spacing, indents, hanging indents, line spacing and alignment
+- bulleted and numbered lists, including nested levels
+- tables with column widths, cell shading, merged cells and their borders
+- inline pictures, hyperlinks, and footnote text (collected at the end, since there are no pages here)
+- the document's own page size and margins, so text wraps where it really wraps
+- explicit page breaks, shown as a rule across the page while editing
+
+**Pages.** The **Pages** button lays the document out on real pages, stacked with gaps between them, at the page
+size the document itself specifies. Page breaks fall where they really fall and the status bar says how many
+pages there are. That view is read-only.
+
+Editing happens on one continuous sheet the width of a real page, rather than on separate pages. The editor is a
+`RichTextBox`, which flows; the paginated views Windows provides don't edit. Splitting an editable document
+across pages means reflowing text between them, which is a layout engine, so PDFPlus doesn't pretend: it shows a
+rule where an explicit page break sits, and sends you to Pages to see the rest.
+
+It is not a word processor, and it does not pretend to be one. These are not kept, and PDFPlus says so in a bar
+above the document when you open one that uses them, and again before it overwrites it:
+
+- page headers and footers, comments
+- fields such as page numbers and cross references
+- tracked changes (the text is kept as it currently reads; the revision history is not)
+- content controls, text boxes, shapes and columns
+- footnotes as footnotes: the words are kept, but they move to the end
+- automatic pagination while editing, tab stops and page layout
+
+Saving rebuilds the file from what PDFPlus understood rather than patching the original, so anything in that
+list is lost on save. Use Save as to keep the original untouched.
 
 ## Licenses
 

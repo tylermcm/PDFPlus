@@ -254,7 +254,124 @@ internal static class UiTest
             ThemeManager.Apply(false);
             window.Home.SetLayout(false);
 
-            // Leave the document clean so closing the window does not prompt.
+            // Text and rich text documents, in tabs alongside the PDF.
+            var plainPath = Path.Combine(outputDirectory, "uitest-sample.txt");
+            await File.WriteAllTextAsync(plainPath,
+                "PDFPlus text editor\r\n\r\nPlain text files open in a tab of their own.\r\n" +
+                "Line endings, encoding and the byte order mark are kept as they were found,\r\n" +
+                "so saving a .txt leaves a .txt.\r\n\r\n    indented line\r\n    another one\r\n");
+            await window.OpenFileAsync(plainPath);
+            await Settle(900);
+            Snap(window, "26-text-plain");
+
+            var richPath = Path.Combine(outputDirectory, "uitest-sample.rtf");
+            await File.WriteAllTextAsync(richPath,
+                @"{\rtf1\ansi\deff0{\fonttbl{\f0 Calibri;}}\fs30 " +
+                @"{\b Rich text} supports {\i italics}, {\ul underline} and colour.\par\par " +
+                @"Formatting survives a round trip through .rtf.\par}");
+            await window.OpenFileAsync(richPath);
+            await Settle(900);
+            Snap(window, "27-text-rich");
+
+            var textEditor = window.ActiveTextEditor;
+            if (textEditor == null)
+            {
+                failures++;
+                log.AppendLine("FAIL the rich text tab did not open");
+            }
+            else
+            {
+                textEditor.SelectAll();
+                textEditor.ToggleBold();
+                await Settle(400);
+                Snap(window, "28-text-bold-applied");
+                textEditor.ShowFind();
+                await Settle(400);
+                Snap(window, "29-text-find");
+                textEditor.HideFind();
+                textEditor.Document.Save(richPath);
+                log.AppendLine($"rich text round trip, dirty={textEditor.Document.IsDirty}");
+            }
+
+            // A Word document, if the fixture has been generated.
+            var docxPath = Path.Combine(testFolder, "sample.docx");
+            if (File.Exists(docxPath))
+            {
+                await window.OpenFileAsync(docxPath);
+                await Settle(1200);
+                Snap(window, "30-docx");
+
+                if (window.ActiveTextEditor is { } wordEditor)
+                {
+                    log.AppendLine($"editing view: {wordEditor.StatusText()}");
+                    Snap(window, "30b-docx-pages-in-editor");
+
+                    // Saving must write the document, not the spacing the page layout adds on top of it.
+                    var plainBefore = wordEditor.Document.ToPlainText();
+                    var reference = Path.Combine(outputDirectory, "docx-save-check.docx");
+                    wordEditor.WithTrueLayout(() => wordEditor.Document.Save(reference));
+                    var reopened = await PDFPlus.Core.TextDocument.OpenAsync(reference);
+                    var marginsLeaked = reopened.Content.Blocks.Any(b => b.Margin.Top > 60);
+                    if (marginsLeaked || reopened.ToPlainText().Length != plainBefore.Length)
+                    {
+                        failures++;
+                        log.AppendLine($"FAIL saving while paginated changed the document (margins leaked={marginsLeaked})");
+                    }
+
+                    wordEditor.SetPageView(true);
+                    await Settle(1200);
+                    Snap(window, "31-docx-pages");
+                    log.AppendLine($"page view: {wordEditor.StatusText()}");
+                    wordEditor.SetZoom(0.5);
+                    await Settle(900);
+                    Snap(window, "32-docx-pages-zoomed");
+                    wordEditor.SetZoom(1);
+                    await Settle(600);
+                    wordEditor.SetPageView(false);
+                    await Settle(600);
+                    if (wordEditor.Document.IsDirty)
+                    {
+                        failures++;
+                        log.AppendLine("FAIL looking at page view marked the document as edited");
+                    }
+
+                    // One paragraph can be taller than a page when prose wraps without the author pressing
+                    // Enter. It still has to flow past a real page break; moving only whole Blocks misses this
+                    // common case and lets the text paint through the grey gap between sheets.
+                    var overflow = new System.Windows.Documents.Paragraph(new System.Windows.Documents.Run(
+                        string.Join(" ", Enumerable.Repeat(
+                            "A long paragraph must continue on the next sheet without adding a saved newline.", 180))));
+                    wordEditor.Document.Content.Blocks.Add(overflow);
+                    await Settle(1200);
+                    if (wordEditor.PageCount < 4 || !overflow.Inlines.OfType<System.Windows.Documents.InlineUIContainer>().Any())
+                    {
+                        failures++;
+                        log.AppendLine($"FAIL wrapped paragraph did not paginate (pages={wordEditor.PageCount})");
+                    }
+
+                    var spacerLeaked = true;
+                    wordEditor.WithTrueLayout(() =>
+                        spacerLeaked = overflow.Inlines.OfType<System.Windows.Documents.InlineUIContainer>().Any());
+                    if (spacerLeaked)
+                    {
+                        failures++;
+                        log.AppendLine("FAIL an editor-only page spacer was visible to save/copy");
+                    }
+
+                    if (wordEditor.FindName("Scroller") is System.Windows.Controls.ScrollViewer scroller)
+                    {
+                        scroller.ScrollToVerticalOffset(1700);
+                        await Settle(300);
+                        Snap(window, "33-docx-wrapped-paragraph-break");
+                    }
+                }
+            }
+            else
+            {
+                log.AppendLine("skipped docx: tests/sample.docx missing");
+            }
+
+            // Leave the documents clean so closing the window does not prompt.
             doc.Save(Path.Combine(outputDirectory, "uitest-result.pdf"));
             log.AppendLine($"saved uitest-result.pdf, pages={doc.PageCount}");
         }

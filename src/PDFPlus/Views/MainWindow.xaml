@@ -247,6 +247,79 @@
                 </StackPanel>
             </Border>
 
+            <!-- Toolbar for text and rich text documents -->
+            <Border x:Name="TextToolbar" Grid.Row="1" Style="{x:Null}" Visibility="Collapsed"
+                    Background="{DynamicResource Brush.Toolbar}" BorderBrush="{DynamicResource Brush.Border}"
+                    BorderThickness="0,0,0,1" Padding="8,5">
+                <Border.Resources>
+                    <Style TargetType="Button" BasedOn="{StaticResource ToolButton}" />
+                    <Style TargetType="ToggleButton" BasedOn="{StaticResource ToolToggle}" />
+                    <Style TargetType="Border" BasedOn="{StaticResource ToolSeparator}" />
+                </Border.Resources>
+                <DockPanel LastChildFill="False">
+                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                        <Button Content="&#xE74E;" ToolTip="Save (Ctrl+S)" Click="OnSaveClick" />
+                        <Border />
+                        <Button x:Name="TextUndoButton" Content="&#xE7A7;" ToolTip="Undo (Ctrl+Z)" Click="OnUndoClick" />
+                        <Button x:Name="TextRedoButton" Content="&#xE7A6;" ToolTip="Redo (Ctrl+Y)" Click="OnRedoClick" />
+                        <Border />
+                        <ComboBox x:Name="FontFamilyBox" Width="164" Height="28" IsEditable="True" VerticalContentAlignment="Center"
+                                  FontFamily="{StaticResource UiFont}" FontSize="13" ToolTip="Font"
+                                  SelectionChanged="OnFontFamilyChanged" />
+                        <ComboBox x:Name="FontSizeBox" Width="64" Height="28" Margin="4,0,0,0" IsEditable="True" VerticalContentAlignment="Center"
+                                  FontFamily="{StaticResource UiFont}" FontSize="13" ToolTip="Font size"
+                                  SelectionChanged="OnFontSizeChanged" />
+                        <Border />
+                        <ToggleButton x:Name="BoldButton" ToolTip="Bold (Ctrl+B)" Click="OnBoldClick">
+                            <TextBlock Text="B" FontFamily="{StaticResource UiFont}" FontSize="14" FontWeight="Bold" />
+                        </ToggleButton>
+                        <ToggleButton x:Name="ItalicButton" ToolTip="Italic (Ctrl+I)" Click="OnItalicClick">
+                            <TextBlock Text="I" FontFamily="Georgia" FontSize="14" FontStyle="Italic" />
+                        </ToggleButton>
+                        <ToggleButton x:Name="UnderlineButton" ToolTip="Underline (Ctrl+U)" Click="OnUnderlineClick">
+                            <TextBlock Text="U" FontFamily="{StaticResource UiFont}" FontSize="14" TextDecorations="Underline" />
+                        </ToggleButton>
+                        <Button x:Name="TextColorButton" ToolTip="Text colour" Click="OnTextColorClick" Padding="8,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE2B1;" VerticalAlignment="Center" />
+                                <Border x:Name="TextColorSwatch" Style="{x:Null}" Width="14" Height="4" Margin="4,7,0,0"
+                                        CornerRadius="1" Background="#1C1D22" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Border />
+                        <ToggleButton x:Name="AlignLeftButton" Content="&#xE8E4;" ToolTip="Align left" Click="OnAlignLeftClick" />
+                        <ToggleButton x:Name="AlignCenterButton" Content="&#xE8E3;" ToolTip="Centre" Click="OnAlignCenterClick" />
+                        <ToggleButton x:Name="AlignRightButton" Content="&#xE8E2;" ToolTip="Align right" Click="OnAlignRightClick" />
+                        <Border />
+                        <ToggleButton x:Name="BulletsButton" Content="&#xE8FD;" ToolTip="Bulleted list" Click="OnBulletsClick" />
+                        <ToggleButton x:Name="NumberingButton" Content="&#xE8FE;" ToolTip="Numbered list" Click="OnNumberingClick" />
+                        <Border />
+                        <ToggleButton x:Name="PageViewButton" ToolTip="Show real pages (read-only)" Click="OnPageViewClick" Padding="10,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7C3;" VerticalAlignment="Center" />
+                                <TextBlock Text="Pages" FontFamily="{StaticResource UiFont}" FontSize="13" Margin="7,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </ToggleButton>
+                    </StackPanel>
+
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button Content="&#xE721;" ToolTip="Find and replace (Ctrl+F)" Click="OnFindClick" />
+                        <Button Content="&#xE706;" ToolTip="Switch light / dark theme" Click="OnThemeClick" />
+                        <Button x:Name="TextMoreButton" Content="&#xE712;" ToolTip="More" Click="OnMoreClick" />
+                    </StackPanel>
+
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,6,0">
+                        <Button Content="&#xE71F;" ToolTip="Zoom out (Ctrl+-)" Click="OnZoomOutClick" />
+                        <Button x:Name="TextZoomButton" Content="100%" MinWidth="60" FontFamily="{StaticResource UiFont}" FontSize="13"
+                                ToolTip="Reset zoom (Ctrl+0)" Click="OnTextZoomResetClick" />
+                        <Button Content="&#xE8A3;" ToolTip="Zoom in (Ctrl++)" Click="OnZoomInClick" />
+                        <Border />
+                        <TextBlock x:Name="TextStatus" VerticalAlignment="Center" Margin="4,0" FontSize="12"
+                                   FontFamily="{StaticResource UiFont}" Foreground="{DynamicResource Brush.TextDim}" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
             <!-- Documents -->
             <Grid x:Name="DocumentHost" Grid.Row="2" />
 

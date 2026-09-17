@@ -16,18 +16,35 @@ using WpfPath = System.Windows.Shapes.Path;
 
 namespace PDFPlus.Views;
 
+/// <summary>
+/// One open tab. A tab holds either a PDF or a text document, never both, so the PDF-only parts of the window
+/// ask for <see cref="Pdf"/> and quietly do nothing when it is null.
+/// </summary>
 public sealed class DocumentTab : INotifyPropertyChanged
 {
     private bool _isActive;
 
-    public DocumentTab(DocumentView view) => View = view;
+    public DocumentTab(DocumentView view)
+    {
+        Pdf = view;
+        Content = view;
+    }
 
-    public DocumentView View { get; }
-    public PdfDocument Document => View.Document;
-    public string Title => Document.Title;
-    public string? FullPath => Document.FilePath;
-    public bool IsDirty => Document.IsDirty;
-    public bool IsProtected => Document.IsProtected;
+    public DocumentTab(TextView view)
+    {
+        Text = view;
+        Content = view;
+    }
+
+    public DocumentView? Pdf { get; }
+    public TextView? Text { get; }
+    /// <summary>The control in the document host, whichever kind of document this is.</summary>
+    public UserControl Content { get; }
+
+    public string Title => Pdf?.Document.Title ?? Text!.Document.Title;
+    public string? FullPath => Pdf?.Document.FilePath ?? Text!.Document.FilePath;
+    public bool IsDirty => Pdf?.Document.IsDirty ?? Text!.Document.IsDirty;
+    public bool IsProtected => Pdf?.Document.IsProtected ?? false;
 
     public bool IsActive
     {
@@ -91,16 +108,16 @@ public partial class MainWindow : Window
     private HomeView? _home;
 
     /// <summary>
-    /// The Home screen, built the first time it is actually shown. Parsing its XAML was the single largest
-    /// step between launching and the window appearing, and opening a PDF from Explorer never shows it.
-    /// Use <see cref="_home"/> directly where Home should not be brought into being just to be asked about.
-    /// </summary>
-    /// <summary>
     /// Set while the app is starting with files to open. Home is the most expensive thing built during
     /// startup, and when a document is on its way it would be shown for a moment and never looked at.
     /// </summary>
     internal bool DeferHome { get; set; }
 
+    /// <summary>
+    /// The Home screen, built the first time it is actually shown. Parsing its XAML was the single largest
+    /// step between launching and the window appearing, and opening a PDF from Explorer never shows it.
+    /// Use <see cref="_home"/> directly where Home should not be brought into being just to be asked about.
+    /// </summary>
     internal HomeView Home
     {
         get
@@ -126,7 +143,14 @@ public partial class MainWindow : Window
     /// <summary>Re-applies the toolbar and Home visibility; used after startup finishes opening its files.</summary>
     internal void RefreshChrome() => UpdateChrome();
 
-    private DocumentView? ActiveView => _active?.View;
+    /// <summary>The active PDF view, or null when the active tab is a text document (or there is no tab).</summary>
+    private DocumentView? ActiveView => _active?.Pdf;
+
+    /// <summary>The active text editor, or null when the active tab is a PDF (or there is no tab).</summary>
+    private TextView? ActiveText => _active?.Text;
+
+    /// <summary>The active text editor, for the scripted UI test.</summary>
+    internal TextView? ActiveTextEditor => ActiveText;
 
     // ---------------------------------------------------------------- window chrome
 
@@ -169,11 +193,18 @@ public partial class MainWindow : Window
             _home.Visibility = Visibility.Collapsed;
         }
         HomeButton.IsChecked = tab == null;
-        Toolbar.Visibility = tab == null ? Visibility.Collapsed : Visibility.Visible;
         Title = tab == null ? "PDFPlus" : $"{tab.Title} - PDFPlus";
+        Toolbar.Visibility = tab?.Pdf != null ? Visibility.Visible : Visibility.Collapsed;
+        TextToolbar.Visibility = tab?.Text != null ? Visibility.Visible : Visibility.Collapsed;
         if (tab == null) return;
+        if (tab.Text is { } editor)
+        {
+            UpdateTextChrome(editor);
+            tab.Refresh();
+            return;
+        }
 
-        var view = tab.View;
+        var view = tab.Pdf!;
         var viewer = view.Viewer;
         var doc = view.Document;
         if (!PageBox.IsKeyboardFocused) PageBox.Text = doc.PageCount == 0 ? "0" : (viewer.CurrentPageIndex + 1).ToString();
@@ -231,7 +262,7 @@ public partial class MainWindow : Window
         view.SaveRequested += (_, _) =>
         {
             if (Save(tab, saveAs: false))
-                view.ShowToast(tab.Document.IsProtected ? "Saved with password protection" : "Saved without a password");
+                view.ShowToast(document.IsProtected ? "Saved with password protection" : "Saved without a password");
         };
         ApplyAnnotationSettings(view);
         DocumentHost.Children.Add(view);
@@ -246,18 +277,19 @@ public partial class MainWindow : Window
             if (_active != null)
             {
                 RememberPage(_active);
-                _active.View.CommitStamps();
-                _active.View.SetEditMode(false);
+                _active.Pdf?.CommitStamps();
+                _active.Pdf?.SetEditMode(false);
                 _active.IsActive = false;
-                _active.View.Visibility = Visibility.Collapsed;
+                _active.Content.Visibility = Visibility.Collapsed;
             }
             _active = tab;
             if (tab != null)
             {
                 tab.IsActive = true;
-                tab.View.Visibility = Visibility.Visible;
-                tab.View.SetEditMode(_toolMode == ToolMode.Edit);
-                tab.View.FocusViewer();
+                tab.Content.Visibility = Visibility.Visible;
+                tab.Pdf?.SetEditMode(_toolMode == ToolMode.Edit);
+                if (tab.Pdf is { } pdf) pdf.FocusViewer();
+                else tab.Text?.FocusEditor();
                 Dispatcher.BeginInvoke(() =>
                 {
                     if (TabStrip.ItemContainerGenerator.ContainerFromItem(tab) is FrameworkElement container) container.BringIntoView();
@@ -276,8 +308,8 @@ public partial class MainWindow : Window
 
     private bool ConfirmDiscard(DocumentTab tab)
     {
-        tab.View.CommitStamps();
-        if (!tab.Document.IsDirty) return true;
+        tab.Pdf?.CommitStamps();
+        if (!tab.IsDirty) return true;
         SelectTab(tab);
         var answer = Dialogs.Ask(this, $"Save changes to \"{tab.Title}\"?", "Your changes will be lost if you don't save them.", "Save", "Don't save");
         return answer switch
@@ -295,13 +327,13 @@ public partial class MainWindow : Window
         AppSettings.Current.Save();
         var index = _tabs.IndexOf(tab);
         _tabs.Remove(tab);
-        DocumentHost.Children.Remove(tab.View);
+        DocumentHost.Children.Remove(tab.Content);
         if (_active == tab)
         {
             _active = null;
             SelectTab(_tabs.Count == 0 ? null : _tabs[Math.Min(index, _tabs.Count - 1)]);
         }
-        tab.View.Dispose();
+        tab.Pdf?.Dispose();
         UpdateChrome();
         return true;
     }
@@ -358,10 +390,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        var existing = _tabs.FirstOrDefault(t => string.Equals(t.Document.FilePath, fullPath, StringComparison.OrdinalIgnoreCase));
+        var existing = _tabs.FirstOrDefault(t => string.Equals(t.FullPath, fullPath, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
             SelectTab(existing);
+            return;
+        }
+
+        if (TextDocument.Handles(fullPath))
+        {
+            await OpenTextFileAsync(fullPath);
             return;
         }
 
@@ -405,15 +443,18 @@ public partial class MainWindow : Window
 
     private async Task OpenWithDialogAsync()
     {
-        var dialog = new OpenFileDialog { Filter = DocumentView.PdfFilter, Multiselect = true, Title = "Open PDF" };
+        var dialog = new OpenFileDialog { Filter = AllDocumentsFilter, Multiselect = true, Title = "Open" };
         if (dialog.ShowDialog(this) != true) return;
         foreach (var file in dialog.FileNames) await OpenFileAsync(file);
     }
 
     private bool Save(DocumentTab tab, bool saveAs)
     {
-        tab.View.CommitStamps();
-        var document = tab.Document;
+        if (tab.Text is { } editor) return SaveText(tab, editor, saveAs);
+
+        var view = tab.Pdf!;
+        view.CommitStamps();
+        var document = view.Document;
         var path = document.FilePath;
         if (saveAs || path == null)
         {
@@ -430,7 +471,7 @@ public partial class MainWindow : Window
             AppSettings.Current.AddRecent(document.FilePath!);
             RefreshRecent();
             UpdateChrome();
-            tab.View.ShowToast("Saved");
+            view.ShowToast("Saved");
             return true;
         }
         catch (Exception ex)
@@ -524,7 +565,8 @@ public partial class MainWindow : Window
 
     private static void RememberPage(DocumentTab tab)
     {
-        if (tab.Document.FilePath is { } path) AppSettings.Current.RememberPage(path, tab.View.Viewer.CurrentPageIndex);
+        if (tab.Pdf is { } view && view.Document.FilePath is { } path)
+            AppSettings.Current.RememberPage(path, view.Viewer.CurrentPageIndex);
     }
 
     private void ResumeAtLastPage(string path)
@@ -634,6 +676,7 @@ public partial class MainWindow : Window
         var shift = modifiers.HasFlag(ModifierKeys.Shift);
         var alt = modifiers.HasFlag(ModifierKeys.Alt);
         var view = ActiveView;
+        var text = ActiveText;
         var handled = true;
 
         if (ctrl && !alt)
@@ -646,11 +689,17 @@ public partial class MainWindow : Window
                 case Key.Tab when _tabs.Count > 1: CycleTab(shift ? -1 : 1); break;
                 case Key.P when view != null: Print(); break;
                 case Key.F when view != null: view.ShowSearch(); break;
+                case Key.F when text != null: text.ShowFind(); break;
                 case Key.OemPlus or Key.Add when view != null: view.Viewer.ZoomIn(); break;
                 case Key.OemMinus or Key.Subtract when view != null: view.Viewer.ZoomOut(); break;
+                case Key.OemPlus or Key.Add when text != null: text.ZoomIn(); break;
+                case Key.OemMinus or Key.Subtract when text != null: text.ZoomOut(); break;
                 case Key.D0 or Key.NumPad0 when view != null: view.Viewer.FitMode = FitMode.Page; break;
                 case Key.D1 or Key.NumPad1 when view != null: view.Viewer.SetZoom(1); break;
                 case Key.D2 or Key.NumPad2 when view != null: view.Viewer.FitMode = FitMode.Width; break;
+                case Key.D0 or Key.NumPad0 when text != null: text.ResetZoom(); break;
+                // Bold, italic and underline are the editor's own; let RichTextBox handle them.
+                case Key.B or Key.I or Key.U when text != null: handled = false; break;
                 default: handled = false; break;
             }
         }
@@ -659,6 +708,7 @@ public partial class MainWindow : Window
             switch (key)
             {
                 case Key.F3 when view != null: view.FindNext(shift); break;
+                case Key.F3 when text != null: text.FindNext(shift); break;
                 case Key.F4 when view != null: view.ToggleSidebar(); break;
                 default: handled = false; break;
             }
@@ -735,13 +785,15 @@ public partial class MainWindow : Window
 
     private void OnUndoClick(object sender, RoutedEventArgs e)
     {
-        ActiveView?.Undo();
+        if (ActiveText is { } editor) editor.Undo();
+        else ActiveView?.Undo();
         UpdateChrome();
     }
 
     private void OnRedoClick(object sender, RoutedEventArgs e)
     {
-        ActiveView?.Redo();
+        if (ActiveText is { } editor) editor.Redo();
+        else ActiveView?.Redo();
         UpdateChrome();
     }
 
@@ -771,8 +823,19 @@ public partial class MainWindow : Window
 
     private void OnPageBoxLostFocus(object sender, KeyboardFocusChangedEventArgs e) => UpdateChrome();
 
-    private void OnZoomInClick(object sender, RoutedEventArgs e) => ActiveView?.Viewer.ZoomIn();
-    private void OnZoomOutClick(object sender, RoutedEventArgs e) => ActiveView?.Viewer.ZoomOut();
+    private void OnZoomInClick(object sender, RoutedEventArgs e)
+    {
+        if (ActiveText is { } editor) editor.ZoomIn();
+        else ActiveView?.Viewer.ZoomIn();
+        UpdateChrome();
+    }
+
+    private void OnZoomOutClick(object sender, RoutedEventArgs e)
+    {
+        if (ActiveText is { } editor) editor.ZoomOut();
+        else ActiveView?.Viewer.ZoomOut();
+        UpdateChrome();
+    }
 
     private void OnFitWidthClick(object sender, RoutedEventArgs e)
     {
@@ -803,7 +866,11 @@ public partial class MainWindow : Window
 
     private void OnRotateLeftClick(object sender, RoutedEventArgs e) => ActiveView?.RotatePages(-1);
     private void OnRotateRightClick(object sender, RoutedEventArgs e) => ActiveView?.RotatePages(1);
-    private void OnFindClick(object sender, RoutedEventArgs e) => ActiveView?.ShowSearch();
+    private void OnFindClick(object sender, RoutedEventArgs e)
+    {
+        if (ActiveText is { } editor) editor.ShowFind();
+        else ActiveView?.ShowSearch();
+    }
     private void OnSelectToolClick(object sender, RoutedEventArgs e) => SetTool(ViewTool.Select);
     private void OnHandToolClick(object sender, RoutedEventArgs e) => SetTool(ViewTool.Hand);
     private void OnTextStampClick(object sender, RoutedEventArgs e) => ToggleStamp(StampKind.Text);
@@ -1018,23 +1085,26 @@ public partial class MainWindow : Window
 
     private void OnMoreClick(object sender, RoutedEventArgs e)
     {
-        var menu = new ContextMenu { PlacementTarget = MoreButton, Placement = PlacementMode.Bottom };
+        var menu = new ContextMenu { PlacementTarget = sender as UIElement ?? MoreButton, Placement = PlacementMode.Bottom };
         menu.Items.Add(DocumentView.MenuItemFor("Open…", "", () => _ = OpenWithDialogAsync(), "Ctrl+O"));
-        menu.Items.Add(DocumentView.MenuItemFor("New PDF from images…", "\uEB9F", () => CreatePdfFromImages([])));
-        if (_active != null)
+        menu.Items.Add(DocumentView.MenuItemFor("New text document", "", NewTextDocument));
+        menu.Items.Add(DocumentView.MenuItemFor("New PDF from images…", "", () => CreatePdfFromImages([])));
+        if (_active is { } tab)
         {
-            var tab = _active;
             menu.Items.Add(DocumentView.MenuItemFor("Save as…", "", () => Save(tab, saveAs: true), "Ctrl+Shift+S"));
-            menu.Items.Add(DocumentView.MenuItemFor("Print…", "", Print, "Ctrl+P"));
-            menu.Items.Add(DocumentView.MenuItemFor("Close tab", "", () => CloseTab(tab), "Ctrl+W"));
-            menu.Items.Add(new Separator());
-            var view = tab.View;
-            var isProtected = view.Document.IsProtected;
-            menu.Items.Add(DocumentView.MenuItemFor(isProtected ? "Change password…" : "Password protect…", "", view.ProtectWithPassword));
-            if (isProtected) menu.Items.Add(DocumentView.MenuItemFor("Remove password…", "", view.RemovePassword));
-            menu.Items.Add(DocumentView.MenuItemFor("Export pages as images…", "", view.ExportImages));
-            menu.Items.Add(DocumentView.MenuItemFor("Save compressed copy…", "", view.CompressCopy));
-            menu.Items.Add(DocumentView.MenuItemFor("Read text with OCR…", "", () => _ = view.ReadWholeDocumentAsync()));
+            if (tab.Pdf != null) menu.Items.Add(DocumentView.MenuItemFor("Print…", "", Print, "Ctrl+P"));
+            menu.Items.Add(DocumentView.MenuItemFor("Close tab", "", () => CloseTab(tab), "Ctrl+W"));
+
+            if (tab.Pdf is { } view)
+            {
+                menu.Items.Add(new Separator());
+                var isProtected = view.Document.IsProtected;
+                menu.Items.Add(DocumentView.MenuItemFor(isProtected ? "Change password…" : "Password protect…", "", view.ProtectWithPassword));
+                if (isProtected) menu.Items.Add(DocumentView.MenuItemFor("Remove password…", "", view.RemovePassword));
+                menu.Items.Add(DocumentView.MenuItemFor("Export pages as images…", "", view.ExportImages));
+                menu.Items.Add(DocumentView.MenuItemFor("Save compressed copy…", "", view.CompressCopy));
+                menu.Items.Add(DocumentView.MenuItemFor("Read text with OCR…", "", () => _ = view.ReadWholeDocumentAsync()));
+            }
         }
         menu.Items.Add(new Separator());
 
