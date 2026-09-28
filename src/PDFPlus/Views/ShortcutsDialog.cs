@@ -27,6 +27,7 @@ internal static class ShortcutsDialog
             ("Ctrl+0", "Fit page"),
             ("Ctrl+1", "Actual size"),
             ("Ctrl+2", "Fit width"),
+            ("Ctrl+3", "Comfortable width (default)"),
             ("F4", "Show or hide the sidebar"),
         ]),
     ];
@@ -45,6 +46,7 @@ internal static class ShortcutsDialog
             ("V", "Select text"),
             ("H", "Hand: drag to scroll"),
             ("E", "Edit text & images"),
+            ("T", "Add a text box"),
         ]),
         ("Editing",
         [

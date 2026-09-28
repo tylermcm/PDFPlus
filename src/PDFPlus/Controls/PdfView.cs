@@ -7,11 +7,13 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using PDFPlus.Core;
+using PDFPlus.Services;
 using static PDFPlus.Native.Pdfium;
 
 namespace PDFPlus.Controls;
 
-public enum FitMode { None, Width, Page }
+/// <summary>Comfortable is the default: the page fills part of the window width, with margins either side.</summary>
+public enum FitMode { None, Width, Page, Comfortable }
 
 public enum ViewTool { Select, Hand }
 
@@ -58,7 +60,7 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
     private PdfDocument? _document;
     private Rect[] _layout = [];
     private double _zoom = 1;
-    private FitMode _fitMode = FitMode.Width;
+    private FitMode _fitMode = FitMode.Comfortable;
     private Size _extent;
     private Size _viewport;
     private Point _offset;
@@ -449,6 +451,12 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
         if (mode == FitMode.Width)
             return Math.Clamp(availableWidth / (sizes.Max(s => s.Width) * PointsToDip), MinZoom, MaxZoom);
         var page = sizes[Math.Clamp(CurrentPageIndex, 0, sizes.Count - 1)];
+        if (mode == FitMode.Comfortable)
+        {
+            // Measured on the page being read, so it fills the requested share even in documents with mixed page sizes.
+            var share = Math.Clamp(AppSettings.Current.PageWidthPercent, 30, 100) / 100;
+            return Math.Clamp(availableWidth * share / (page.Width * PointsToDip), MinZoom, MaxZoom);
+        }
         var byWidth = availableWidth / (page.Width * PointsToDip);
         var byHeight = Math.Max(50, _viewport.Height - 2 * PageMargin) / (page.Height * PointsToDip);
         return Math.Clamp(Math.Min(byWidth, byHeight), MinZoom, MaxZoom);

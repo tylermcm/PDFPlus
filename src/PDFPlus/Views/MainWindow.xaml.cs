@@ -163,6 +163,7 @@ public partial class MainWindow : Window
         FillSignModeButton.IsChecked = _toolMode == ToolMode.FillSign;
         ToolRow.Visibility = _toolMode == ToolMode.None ? Visibility.Collapsed : Visibility.Visible;
         EditRow.Visibility = _toolMode == ToolMode.Edit ? Visibility.Visible : Visibility.Collapsed;
+        AddTextButton.IsChecked = view.TextBoxToolActive;
         AnnotateRow.Visibility = _toolMode == ToolMode.Annotate ? Visibility.Visible : Visibility.Collapsed;
         FillSignRow.Visibility = _toolMode == ToolMode.FillSign ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in AnnotateRow.Children.OfType<ToggleButton>())
@@ -598,6 +599,7 @@ public partial class MainWindow : Window
                 case Key.D0 or Key.NumPad0 when view != null: view.Viewer.FitMode = FitMode.Page; break;
                 case Key.D1 or Key.NumPad1 when view != null: view.Viewer.SetZoom(1); break;
                 case Key.D2 or Key.NumPad2 when view != null: view.Viewer.FitMode = FitMode.Width; break;
+                case Key.D3 or Key.NumPad3 when view != null: view.Viewer.FitMode = FitMode.Comfortable; break;
                 default: handled = false; break;
             }
         }
@@ -631,6 +633,7 @@ public partial class MainWindow : Window
         else if (modifiers == ModifierKeys.None && e.Key == Key.V) SetTool(ViewTool.Select);
         else if (modifiers == ModifierKeys.None && e.Key == Key.H) SetTool(ViewTool.Hand);
         else if (modifiers == ModifierKeys.None && e.Key == Key.E) SetToolMode(_toolMode == ToolMode.Edit ? ToolMode.None : ToolMode.Edit);
+        else if (modifiers == ModifierKeys.None && e.Key == Key.T) ToggleTextBoxTool();
         else return;
 
         e.Handled = true;
@@ -744,8 +747,31 @@ public partial class MainWindow : Window
         menu.Items.Add(DocumentView.MenuItemFor("Fit width", "", () => viewer.FitMode = FitMode.Width, "Ctrl+2"));
         menu.Items.Add(DocumentView.MenuItemFor("Fit page", "", () => viewer.FitMode = FitMode.Page, "Ctrl+0"));
         menu.Items.Add(DocumentView.MenuItemFor("Actual size", null, () => viewer.SetZoom(1), "Ctrl+1"));
+        menu.Items.Add(ComfortableZoomMenu(viewer));
         menu.Closed += (_, _) => UpdateChrome();
         menu.IsOpen = true;
+    }
+
+    /// <summary>The default zoom: the page fills part of the window, with empty space either side.</summary>
+    private static MenuItem ComfortableZoomMenu(PdfView viewer)
+    {
+        var item = new MenuItem
+        {
+            Header = "Comfortable width",
+            InputGestureText = "Ctrl+3",
+            IsChecked = viewer.FitMode == FitMode.Comfortable,
+        };
+        foreach (var percent in new[] { 50.0, 60.0, 70.0, 80.0 })
+        {
+            var share = percent;
+            item.Items.Add(DocumentView.MenuItemFor($"Page fills {share:0}% of the window", null, () =>
+            {
+                AppSettings.Current.PageWidthPercent = share;
+                AppSettings.Current.Save();
+                viewer.FitMode = FitMode.Comfortable;
+            }, isChecked: Math.Abs(AppSettings.Current.PageWidthPercent - share) < 0.5));
+        }
+        return item;
     }
 
     private void OnRotateLeftClick(object sender, RoutedEventArgs e) => ActiveView?.RotatePages(-1);
@@ -837,6 +863,16 @@ public partial class MainWindow : Window
         SetToolMode(_toolMode == ToolMode.Edit ? ToolMode.None : ToolMode.Edit);
 
     private void OnAddImageClick(object sender, RoutedEventArgs e) => ActiveView?.AddImage();
+
+    private void OnAddTextClick(object sender, RoutedEventArgs e) => ToggleTextBoxTool();
+
+    private void ToggleTextBoxTool()
+    {
+        if (ActiveView is not { } view) return;
+        if (_toolMode != ToolMode.Edit) SetToolMode(ToolMode.Edit);
+        view.SetTextBoxTool(!view.TextBoxToolActive);
+        UpdateChrome();
+    }
 
     internal void SetToolMode(ToolMode mode)
     {

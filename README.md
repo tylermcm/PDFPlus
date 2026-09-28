@@ -15,6 +15,8 @@ A fast, portable PDF viewer and editor for Windows. One exe, no installer, no ac
 **Viewing**
 - Tabs (open many PDFs at once; opening a PDF while PDFPlus is running adds a tab)
 - Smooth continuous scrolling with background rendering. Only visible pages are drawn, so huge documents stay fast
+- Opens at a comfortable zoom: the page fills 60% of the window, with margins either side (Ctrl+3).
+  Pick 50/60/70/80% from the zoom menu; the choice is remembered
 - Zoom: Ctrl+wheel at the cursor, presets, fit width, fit page. Very high zoom renders a sharp tile of just the visible area
 - Page thumbnails, bookmarks (outline), clickable links (web links ask before opening)
 - Find with match case / whole word, highlighted results, next/previous
@@ -27,6 +29,8 @@ A fast, portable PDF viewer and editor for Windows. One exe, no installer, no ac
 - Extract a page range to a new PDF, split a document every N pages, combine several PDFs into one
 
 **Edit** (toolbar → Edit, or press E)
+- Add text: click "Add text" (or press T, or right-click a page → Add text here), then click where you want to
+  type. The box stays movable and resizable while you type, and becomes real PDF text when you click away
 - Click a line of text and retype it in place; Enter saves, Esc cancels, empty text deletes the line
 - Keeps the position, size and color. The PDF's own font is reused when it has every character you type;
   otherwise the matching Windows font (e.g. Calibri) is embedded as a small subset, usually a few tens of KB

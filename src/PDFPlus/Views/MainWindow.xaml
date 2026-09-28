@@ -217,6 +217,12 @@
                     </StackPanel>
 
                     <StackPanel x:Name="EditRow" Orientation="Horizontal" Visibility="Collapsed">
+                        <ToggleButton x:Name="AddTextButton" ToolTip="Add a text box: click where you want to type (T)" Click="OnAddTextClick" Padding="10,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE8D2;" VerticalAlignment="Center" />
+                                <TextBlock Text="Add text" FontFamily="{StaticResource UiFont}" FontSize="13" Margin="7,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </ToggleButton>
                         <Button ToolTip="Add a picture from a file (you can also drop one onto the page)" Click="OnAddImageClick" Padding="10,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xEB9F;" VerticalAlignment="Center" />
@@ -224,7 +230,7 @@
                             </StackPanel>
                         </Button>
                         <Border />
-                        <TextBlock Text="Click text to retype it  ·  drag text or images to move them  ·  drag a corner to resize  ·  Del removes"
+                        <TextBlock Text="Click text to retype it  ·  Add text to type somewhere new  ·  drag to move  ·  drag a corner to resize  ·  Del removes"
                                    VerticalAlignment="Center" Margin="4,0" FontSize="12" Foreground="{DynamicResource Brush.TextDim}" />
                     </StackPanel>
 

@@ -210,6 +210,17 @@ internal static class UiTest
             await Settle(1500);
             Snap(window, "19-image-selected");
 
+            view.SetTextBoxTool(true);
+            await Settle(400);
+            Snap(window, "19b-text-tool-armed");
+            view.StartTextBox(new PageHit(0, new Point(120, 300)));
+            await Settle(400);
+            if (FindDescendant<TextBox>(view.Stamps) is { } newText) newText.Text = "Typed straight onto the page";
+            await Settle(400);
+            Snap(window, "19c-text-box");
+            view.CommitStamps();
+            await Settle(1200);
+
             var realWorld = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input))!, "edit-sample.pdf");
             if (File.Exists(realWorld))
             {

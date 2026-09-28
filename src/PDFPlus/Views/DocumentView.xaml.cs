@@ -113,6 +113,7 @@ public partial class DocumentView : UserControl, IDisposable
         Edits.Message += (_, message) => ShowToast(message);
         Edits.SelectionChanged += (_, _) => RaiseStatus();
         Edits.AddImageRequested += (_, hit) => AddImage(hit);
+        Edits.AddTextRequested += (_, hit) => StartTextBox(hit);
 
         _thumbTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _thumbTimer.Tick += (_, _) => FlushThumbnails();
@@ -738,7 +739,34 @@ public partial class DocumentView : UserControl, IDisposable
             View.ClearSelection();
         }
         Edits.IsActive = on;
+        if (!on) PlacementHint.Visibility = Visibility.Collapsed;
         FocusViewer();
+        RaiseStatus();
+    }
+
+    public bool TextBoxToolActive => Edits.TextTool;
+
+    /// <summary>Arms the text tool: the next click on a page opens a new text box to type in.</summary>
+    public void SetTextBoxTool(bool on)
+    {
+        if (on)
+        {
+            Stamps.Commit();
+            Disarm();
+            if (!Edits.IsActive) EditModeRequested?.Invoke(this, EventArgs.Empty);
+        }
+        Edits.TextTool = on;
+        PlacementHintText.Text = "Click where you want to type     Esc to stop";
+        PlacementHint.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        FocusViewer();
+        RaiseStatus();
+    }
+
+    /// <summary>Starts a text box on a page. It stays editable until you click away, then becomes PDF text.</summary>
+    internal void StartTextBox(PageHit hit)
+    {
+        PlacementHint.Visibility = Visibility.Collapsed;
+        Stamps.Place(StampKind.Text, hit, null);
         RaiseStatus();
     }
 
@@ -950,6 +978,12 @@ public partial class DocumentView : UserControl, IDisposable
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         var typing = Keyboard.FocusedElement is TextBox or PasswordBox;
+        if (Edits.TextTool && !typing && e.Key == Key.Escape)
+        {
+            SetTextBoxTool(false);
+            e.Handled = true;
+            return;
+        }
         if (Edits.IsActive && !typing && Edits.Selected is { } selected)
         {
             switch (e.Key)

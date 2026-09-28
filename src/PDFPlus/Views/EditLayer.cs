@@ -24,6 +24,7 @@ public sealed class EditLayer : Canvas
     private PdfView? _view;
     private PdfDocument? _document;
     private bool _active;
+    private bool _textTool;
     private readonly Dictionary<int, List<PageObjectInfo>> _cache = new();
 
     private PageObjectInfo? _hover;
@@ -44,6 +45,7 @@ public sealed class EditLayer : Canvas
     /// <summary>Short status messages for the toast.</summary>
     public event EventHandler<string>? Message;
     public event EventHandler<PageHit>? AddImageRequested;
+    public event EventHandler<PageHit>? AddTextRequested;
     public event EventHandler? SelectionChanged;
 
     public EditLayer()
@@ -78,11 +80,31 @@ public sealed class EditLayer : Canvas
                 CommitEditor();
                 CancelDrag();
                 SetSelected(null);
+                TextTool = false;
                 _hover = null;
             }
             _active = value;
             Background = value ? Brushes.Transparent : null;
             Cursor = null;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>When on, the next click on a page starts a new text box there.</summary>
+    public bool TextTool
+    {
+        get => _textTool;
+        set
+        {
+            if (_textTool == value) return;
+            _textTool = value;
+            if (value)
+            {
+                CommitEditor();
+                SetSelected(null);
+                _hover = null;
+            }
+            Cursor = value ? Cursors.IBeam : null;
             InvalidateVisual();
         }
     }
@@ -168,6 +190,13 @@ public sealed class EditLayer : Canvas
         CommitEditor();
         _view.Focus();
 
+        if (_textTool)
+        {
+            TextTool = false;
+            if (Hit(position) is { } spot) AddTextRequested?.Invoke(this, spot);
+            return;
+        }
+
         var handle = HandleAt(position);
         if (handle >= 0 && _selected is { } image)
         {
@@ -240,6 +269,12 @@ public sealed class EditLayer : Canvas
 
     private void UpdateHover(Point position)
     {
+        if (_textTool)
+        {
+            Cursor = Cursors.IBeam;
+            SetHover(null);
+            return;
+        }
         PageObjectInfo? hover = null;
         Cursor? cursor = null;
         var handle = HandleAt(position);
@@ -345,6 +380,7 @@ public sealed class EditLayer : Canvas
         if (hit is { } where)
         {
             if (menu.Items.Count > 0) menu.Items.Add(new Separator());
+            menu.Items.Add(DocumentView.MenuItemFor("Add text here", "", () => AddTextRequested?.Invoke(this, where)));
             menu.Items.Add(DocumentView.MenuItemFor("Add image here…", "\uEB9F", () => AddImageRequested?.Invoke(this, where)));
         }
         if (menu.Items.Count > 0) menu.IsOpen = true;

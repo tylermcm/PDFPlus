@@ -41,6 +41,8 @@ public sealed class AppSettings
     public string HomeLayout { get; set; } = "Grid";
     public List<SavedSignature> Signatures { get; set; } = new();
     public double TextSize { get; set; } = 11;
+    /// <summary>How much of the window width a page fills at the default "comfortable" zoom.</summary>
+    public double PageWidthPercent { get; set; } = 60;
     public string InkColor { get; set; } = "#000000";
     public string AnnotationColor { get; set; } = "#FFD400";
     public double AnnotationWidth { get; set; } = 2;
