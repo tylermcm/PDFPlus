@@ -16,18 +16,35 @@ using WpfPath = System.Windows.Shapes.Path;
 
 namespace PDFPlus.Views;
 
+/// <summary>
+/// One open tab. A tab holds either a PDF or a text document, never both, so the PDF-only parts of the window
+/// ask for <see cref="Pdf"/> and quietly do nothing when it is null.
+/// </summary>
 public sealed class DocumentTab : INotifyPropertyChanged
 {
     private bool _isActive;
 
-    public DocumentTab(DocumentView view) => View = view;
+    public DocumentTab(DocumentView view)
+    {
+        Pdf = view;
+        Content = view;
+    }
 
-    public DocumentView View { get; }
-    public PdfDocument Document => View.Document;
-    public string Title => Document.Title;
-    public string? FullPath => Document.FilePath;
-    public bool IsDirty => Document.IsDirty;
-    public bool IsProtected => Document.IsProtected;
+    public DocumentTab(TextView view)
+    {
+        Text = view;
+        Content = view;
+    }
+
+    public DocumentView? Pdf { get; }
+    public TextView? Text { get; }
+    /// <summary>The control in the document host, whichever kind of document this is.</summary>
+    public UserControl Content { get; }
+
+    public string Title => Pdf?.Document.Title ?? Text!.Document.Title;
+    public string? FullPath => Pdf?.Document.FilePath ?? Text!.Document.FilePath;
+    public bool IsDirty => Pdf?.Document.IsDirty ?? Text!.Document.IsDirty;
+    public bool IsProtected => Pdf?.Document.IsProtected ?? false;
 
     public bool IsActive
     {
@@ -56,22 +73,15 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<DocumentTab> _tabs = new();
     private DocumentTab? _active;
     private DocumentTab? _tabDragTab;
+    /// <summary>An update the user asked to install; started once the window has finished closing.</summary>
+    private string? _pendingInstaller;
 
-    public MainWindow()
+    public MainWindow(bool deferHome = false)
     {
-        InitializeComponent();
+        DeferHome = deferHome;
+        Timeline.Measure("  xaml parsed", InitializeComponent);
         TabStrip.ItemsSource = _tabs;
         LogoImage.Source = AppIcon.Get(32);
-        Home.OpenRequested += async (_, path) =>
-        {
-            if (path == null) await OpenWithDialogAsync();
-            else await OpenFileAsync(path);
-        };
-        Home.ToolRequested += (_, request) => RunHomeTool(request);
-        Home.CombineRequested += (_, _) => CombineFiles();
-        Home.ImagesToPdfRequested += (_, files) => CreatePdfFromImages(files);
-        Home.AboutRequested += (_, _) => ShowAbout();
-        Home.ShortcutsRequested += (_, _) => ShowShortcuts();
         Icon = AppIcon.Get(256);
 
         var settings = AppSettings.Current;
@@ -86,13 +96,61 @@ public partial class MainWindow : Window
         Drop += OnWindowDrop;
         Closing += OnWindowClosing;
 
+        Loaded += (_, _) => _ = CheckForUpdatesAtStartupAsync();
+
+        Timeline.Mark("  window wired up");
         UpdateWindowStateChrome();
-        BuildAnnotationOptions();
-        RefreshRecent();
+        Timeline.Measure("  annotation options built", BuildAnnotationOptions);
+        Timeline.Measure("  recent files listed", RefreshRecent);
         UpdateChrome();
     }
 
-    private DocumentView? ActiveView => _active?.View;
+    private HomeView? _home;
+
+    /// <summary>
+    /// Set while the app is starting with files to open. Home is the most expensive thing built during
+    /// startup, and when a document is on its way it would be shown for a moment and never looked at.
+    /// </summary>
+    internal bool DeferHome { get; set; }
+
+    /// <summary>
+    /// The Home screen, built the first time it is actually shown. Parsing its XAML was the single largest
+    /// step between launching and the window appearing, and opening a PDF from Explorer never shows it.
+    /// Use <see cref="_home"/> directly where Home should not be brought into being just to be asked about.
+    /// </summary>
+    internal HomeView Home
+    {
+        get
+        {
+            if (_home != null) return _home;
+
+            _home = new HomeView();
+            _home.OpenRequested += async (_, path) =>
+            {
+                if (path == null) await OpenWithDialogAsync();
+                else await OpenFileAsync(path);
+            };
+            _home.ToolRequested += (_, request) => RunHomeTool(request);
+            _home.CombineRequested += (_, _) => CombineFiles();
+            _home.ImagesToPdfRequested += (_, files) => CreatePdfFromImages(files);
+            _home.AboutRequested += (_, _) => ShowAbout();
+            _home.ShortcutsRequested += (_, _) => ShowShortcuts();
+            HomeHost.Child = _home;
+            return _home;
+        }
+    }
+
+    /// <summary>Re-applies the toolbar and Home visibility; used after startup finishes opening its files.</summary>
+    internal void RefreshChrome() => UpdateChrome();
+
+    /// <summary>The active PDF view, or null when the active tab is a text document (or there is no tab).</summary>
+    private DocumentView? ActiveView => _active?.Pdf;
+
+    /// <summary>The active text editor, or null when the active tab is a PDF (or there is no tab).</summary>
+    private TextView? ActiveText => _active?.Text;
+
+    /// <summary>The active text editor, for the scripted UI test.</summary>
+    internal TextView? ActiveTextEditor => ActiveText;
 
     // ---------------------------------------------------------------- window chrome
 
@@ -126,13 +184,27 @@ public partial class MainWindow : Window
     private void UpdateChrome()
     {
         var tab = _active;
-        Home.Visibility = tab == null ? Visibility.Visible : Visibility.Collapsed;
+        if (tab == null)
+        {
+            if (!DeferHome) Home.Visibility = Visibility.Visible;
+        }
+        else if (_home != null)
+        {
+            _home.Visibility = Visibility.Collapsed;
+        }
         HomeButton.IsChecked = tab == null;
-        Toolbar.Visibility = tab == null ? Visibility.Collapsed : Visibility.Visible;
         Title = tab == null ? "PDFPlus" : $"{tab.Title} - PDFPlus";
+        Toolbar.Visibility = tab?.Pdf != null ? Visibility.Visible : Visibility.Collapsed;
+        TextToolbar.Visibility = tab?.Text != null ? Visibility.Visible : Visibility.Collapsed;
         if (tab == null) return;
+        if (tab.Text is { } editor)
+        {
+            UpdateTextChrome(editor);
+            tab.Refresh();
+            return;
+        }
 
-        var view = tab.View;
+        var view = tab.Pdf!;
         var viewer = view.Viewer;
         var doc = view.Document;
         if (!PageBox.IsKeyboardFocused) PageBox.Text = doc.PageCount == 0 ? "0" : (viewer.CurrentPageIndex + 1).ToString();
@@ -191,7 +263,7 @@ public partial class MainWindow : Window
         view.SaveRequested += (_, _) =>
         {
             if (Save(tab, saveAs: false))
-                view.ShowToast(tab.Document.IsProtected ? "Saved with password protection" : "Saved without a password");
+                view.ShowToast(document.IsProtected ? "Saved with password protection" : "Saved without a password");
         };
         ApplyAnnotationSettings(view);
         DocumentHost.Children.Add(view);
@@ -206,18 +278,19 @@ public partial class MainWindow : Window
             if (_active != null)
             {
                 RememberPage(_active);
-                _active.View.CommitStamps();
-                _active.View.SetEditMode(false);
+                _active.Pdf?.CommitStamps();
+                _active.Pdf?.SetEditMode(false);
                 _active.IsActive = false;
-                _active.View.Visibility = Visibility.Collapsed;
+                _active.Content.Visibility = Visibility.Collapsed;
             }
             _active = tab;
             if (tab != null)
             {
                 tab.IsActive = true;
-                tab.View.Visibility = Visibility.Visible;
-                tab.View.SetEditMode(_toolMode == ToolMode.Edit);
-                tab.View.FocusViewer();
+                tab.Content.Visibility = Visibility.Visible;
+                tab.Pdf?.SetEditMode(_toolMode == ToolMode.Edit);
+                if (tab.Pdf is { } pdf) pdf.FocusViewer();
+                else tab.Text?.FocusEditor();
                 Dispatcher.BeginInvoke(() =>
                 {
                     if (TabStrip.ItemContainerGenerator.ContainerFromItem(tab) is FrameworkElement container) container.BringIntoView();
@@ -236,8 +309,8 @@ public partial class MainWindow : Window
 
     private bool ConfirmDiscard(DocumentTab tab)
     {
-        tab.View.CommitStamps();
-        if (!tab.Document.IsDirty) return true;
+        tab.Pdf?.CommitStamps();
+        if (!tab.IsDirty) return true;
         SelectTab(tab);
         var answer = Dialogs.Ask(this, $"Save changes to \"{tab.Title}\"?", "Your changes will be lost if you don't save them.", "Save", "Don't save");
         return answer switch
@@ -255,13 +328,13 @@ public partial class MainWindow : Window
         AppSettings.Current.Save();
         var index = _tabs.IndexOf(tab);
         _tabs.Remove(tab);
-        DocumentHost.Children.Remove(tab.View);
+        DocumentHost.Children.Remove(tab.Content);
         if (_active == tab)
         {
             _active = null;
             SelectTab(_tabs.Count == 0 ? null : _tabs[Math.Min(index, _tabs.Count - 1)]);
         }
-        tab.View.Dispose();
+        tab.Pdf?.Dispose();
         UpdateChrome();
         return true;
     }
@@ -318,10 +391,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        var existing = _tabs.FirstOrDefault(t => string.Equals(t.Document.FilePath, fullPath, StringComparison.OrdinalIgnoreCase));
+        var existing = _tabs.FirstOrDefault(t => string.Equals(t.FullPath, fullPath, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
             SelectTab(existing);
+            return;
+        }
+
+        if (TextDocument.Handles(fullPath))
+        {
+            await OpenTextFileAsync(fullPath);
             return;
         }
 
@@ -333,10 +412,11 @@ public partial class MainWindow : Window
                 Mouse.OverrideCursor = Cursors.AppStarting;
                 var document = await PdfDocument.OpenAsync(fullPath, password);
                 Mouse.OverrideCursor = null;
-                AddTab(document);
+                Timeline.Mark("document parsed");
+                Timeline.Measure("tab added", () => AddTab(document));
                 AppSettings.Current.AddRecent(fullPath);
-                RefreshRecent();
-                ResumeAtLastPage(fullPath);
+                Timeline.Measure("recent list refreshed", RefreshRecent);
+                Timeline.Measure("resumed at last page", () => ResumeAtLastPage(fullPath));
                 return;
             }
             catch (PdfPasswordRequiredException ex)
@@ -364,15 +444,18 @@ public partial class MainWindow : Window
 
     private async Task OpenWithDialogAsync()
     {
-        var dialog = new OpenFileDialog { Filter = DocumentView.PdfFilter, Multiselect = true, Title = "Open PDF" };
+        var dialog = new OpenFileDialog { Filter = AllDocumentsFilter, Multiselect = true, Title = "Open" };
         if (dialog.ShowDialog(this) != true) return;
         foreach (var file in dialog.FileNames) await OpenFileAsync(file);
     }
 
     private bool Save(DocumentTab tab, bool saveAs)
     {
-        tab.View.CommitStamps();
-        var document = tab.Document;
+        if (tab.Text is { } editor) return SaveText(tab, editor, saveAs);
+
+        var view = tab.Pdf!;
+        view.CommitStamps();
+        var document = view.Document;
         var path = document.FilePath;
         if (saveAs || path == null)
         {
@@ -389,7 +472,7 @@ public partial class MainWindow : Window
             AppSettings.Current.AddRecent(document.FilePath!);
             RefreshRecent();
             UpdateChrome();
-            tab.View.ShowToast("Saved");
+            view.ShowToast("Saved");
             return true;
         }
         catch (Exception ex)
@@ -425,6 +508,17 @@ public partial class MainWindow : Window
             settings.WindowHeight = bounds.Height;
         }
         settings.Save();
+
+        // The installer replaces the files this process is running from, so it only starts once we're on the way out.
+        if (_pendingInstaller is not { } installer) return;
+        try
+        {
+            UpdateService.Launch(installer);
+        }
+        catch (Exception ex)
+        {
+            Dialogs.Error(null, "The update couldn't be started", $"{ex.Message}\n\nThe file is at {installer}.");
+        }
     }
 
     private void CombineFiles()
@@ -461,7 +555,7 @@ public partial class MainWindow : Window
 
     private void RefreshRecent()
     {
-        if (Home.IsVisible) Home.Refresh();
+        if (_home is { IsVisible: true } home) home.Refresh();
     }
 
     // ---------------------------------------------------------------- home
@@ -472,7 +566,8 @@ public partial class MainWindow : Window
 
     private static void RememberPage(DocumentTab tab)
     {
-        if (tab.Document.FilePath is { } path) AppSettings.Current.RememberPage(path, tab.View.Viewer.CurrentPageIndex);
+        if (tab.Pdf is { } view && view.Document.FilePath is { } path)
+            AppSettings.Current.RememberPage(path, view.Viewer.CurrentPageIndex);
     }
 
     private void ResumeAtLastPage(string path)
@@ -582,6 +677,7 @@ public partial class MainWindow : Window
         var shift = modifiers.HasFlag(ModifierKeys.Shift);
         var alt = modifiers.HasFlag(ModifierKeys.Alt);
         var view = ActiveView;
+        var text = ActiveText;
         var handled = true;
 
         if (ctrl && !alt)
@@ -594,12 +690,18 @@ public partial class MainWindow : Window
                 case Key.Tab when _tabs.Count > 1: CycleTab(shift ? -1 : 1); break;
                 case Key.P when view != null: Print(); break;
                 case Key.F when view != null: view.ShowSearch(); break;
+                case Key.F when text != null: text.ShowFind(); break;
                 case Key.OemPlus or Key.Add when view != null: view.Viewer.ZoomIn(); break;
                 case Key.OemMinus or Key.Subtract when view != null: view.Viewer.ZoomOut(); break;
+                case Key.OemPlus or Key.Add when text != null: text.ZoomIn(); break;
+                case Key.OemMinus or Key.Subtract when text != null: text.ZoomOut(); break;
                 case Key.D0 or Key.NumPad0 when view != null: view.Viewer.FitMode = FitMode.Page; break;
                 case Key.D1 or Key.NumPad1 when view != null: view.Viewer.SetZoom(1); break;
                 case Key.D2 or Key.NumPad2 when view != null: view.Viewer.FitMode = FitMode.Width; break;
                 case Key.D3 or Key.NumPad3 when view != null: view.Viewer.FitMode = FitMode.Comfortable; break;
+                case Key.D0 or Key.NumPad0 when text != null: text.ResetZoom(); break;
+                // Bold, italic and underline are the editor's own; let RichTextBox handle them.
+                case Key.B or Key.I or Key.U when text != null: handled = false; break;
                 default: handled = false; break;
             }
         }
@@ -608,6 +710,7 @@ public partial class MainWindow : Window
             switch (key)
             {
                 case Key.F3 when view != null: view.FindNext(shift); break;
+                case Key.F3 when text != null: text.FindNext(shift); break;
                 case Key.F4 when view != null: view.ToggleSidebar(); break;
                 default: handled = false; break;
             }
@@ -685,13 +788,15 @@ public partial class MainWindow : Window
 
     private void OnUndoClick(object sender, RoutedEventArgs e)
     {
-        ActiveView?.Undo();
+        if (ActiveText is { } editor) editor.Undo();
+        else ActiveView?.Undo();
         UpdateChrome();
     }
 
     private void OnRedoClick(object sender, RoutedEventArgs e)
     {
-        ActiveView?.Redo();
+        if (ActiveText is { } editor) editor.Redo();
+        else ActiveView?.Redo();
         UpdateChrome();
     }
 
@@ -721,8 +826,19 @@ public partial class MainWindow : Window
 
     private void OnPageBoxLostFocus(object sender, KeyboardFocusChangedEventArgs e) => UpdateChrome();
 
-    private void OnZoomInClick(object sender, RoutedEventArgs e) => ActiveView?.Viewer.ZoomIn();
-    private void OnZoomOutClick(object sender, RoutedEventArgs e) => ActiveView?.Viewer.ZoomOut();
+    private void OnZoomInClick(object sender, RoutedEventArgs e)
+    {
+        if (ActiveText is { } editor) editor.ZoomIn();
+        else ActiveView?.Viewer.ZoomIn();
+        UpdateChrome();
+    }
+
+    private void OnZoomOutClick(object sender, RoutedEventArgs e)
+    {
+        if (ActiveText is { } editor) editor.ZoomOut();
+        else ActiveView?.Viewer.ZoomOut();
+        UpdateChrome();
+    }
 
     private void OnFitWidthClick(object sender, RoutedEventArgs e)
     {
@@ -776,7 +892,11 @@ public partial class MainWindow : Window
 
     private void OnRotateLeftClick(object sender, RoutedEventArgs e) => ActiveView?.RotatePages(-1);
     private void OnRotateRightClick(object sender, RoutedEventArgs e) => ActiveView?.RotatePages(1);
-    private void OnFindClick(object sender, RoutedEventArgs e) => ActiveView?.ShowSearch();
+    private void OnFindClick(object sender, RoutedEventArgs e)
+    {
+        if (ActiveText is { } editor) editor.ShowFind();
+        else ActiveView?.ShowSearch();
+    }
     private void OnSelectToolClick(object sender, RoutedEventArgs e) => SetTool(ViewTool.Select);
     private void OnHandToolClick(object sender, RoutedEventArgs e) => SetTool(ViewTool.Hand);
     private void OnTextStampClick(object sender, RoutedEventArgs e) => ToggleStamp(StampKind.Text);
@@ -1001,22 +1121,26 @@ public partial class MainWindow : Window
 
     private void OnMoreClick(object sender, RoutedEventArgs e)
     {
-        var menu = new ContextMenu { PlacementTarget = MoreButton, Placement = PlacementMode.Bottom };
+        var menu = new ContextMenu { PlacementTarget = sender as UIElement ?? MoreButton, Placement = PlacementMode.Bottom };
         menu.Items.Add(DocumentView.MenuItemFor("Open…", "", () => _ = OpenWithDialogAsync(), "Ctrl+O"));
-        menu.Items.Add(DocumentView.MenuItemFor("New PDF from images…", "\uEB9F", () => CreatePdfFromImages([])));
-        if (_active != null)
+        menu.Items.Add(DocumentView.MenuItemFor("New text document", "", NewTextDocument));
+        menu.Items.Add(DocumentView.MenuItemFor("New PDF from images…", "", () => CreatePdfFromImages([])));
+        if (_active is { } tab)
         {
-            var tab = _active;
             menu.Items.Add(DocumentView.MenuItemFor("Save as…", "", () => Save(tab, saveAs: true), "Ctrl+Shift+S"));
-            menu.Items.Add(DocumentView.MenuItemFor("Print…", "", Print, "Ctrl+P"));
-            menu.Items.Add(DocumentView.MenuItemFor("Close tab", "", () => CloseTab(tab), "Ctrl+W"));
-            menu.Items.Add(new Separator());
-            var view = tab.View;
-            var isProtected = view.Document.IsProtected;
-            menu.Items.Add(DocumentView.MenuItemFor(isProtected ? "Change password…" : "Password protect…", "", view.ProtectWithPassword));
-            if (isProtected) menu.Items.Add(DocumentView.MenuItemFor("Remove password…", "", view.RemovePassword));
-            menu.Items.Add(DocumentView.MenuItemFor("Export pages as images…", "", view.ExportImages));
-            menu.Items.Add(DocumentView.MenuItemFor("Save compressed copy…", "", view.CompressCopy));
+            if (tab.Pdf != null) menu.Items.Add(DocumentView.MenuItemFor("Print…", "", Print, "Ctrl+P"));
+            menu.Items.Add(DocumentView.MenuItemFor("Close tab", "", () => CloseTab(tab), "Ctrl+W"));
+
+            if (tab.Pdf is { } view)
+            {
+                menu.Items.Add(new Separator());
+                var isProtected = view.Document.IsProtected;
+                menu.Items.Add(DocumentView.MenuItemFor(isProtected ? "Change password…" : "Password protect…", "", view.ProtectWithPassword));
+                if (isProtected) menu.Items.Add(DocumentView.MenuItemFor("Remove password…", "", view.RemovePassword));
+                menu.Items.Add(DocumentView.MenuItemFor("Export pages as images…", "", view.ExportImages));
+                menu.Items.Add(DocumentView.MenuItemFor("Save compressed copy…", "", view.CompressCopy));
+                menu.Items.Add(DocumentView.MenuItemFor("Read text with OCR…", "", () => _ = view.ReadWholeDocumentAsync()));
+            }
         }
         menu.Items.Add(new Separator());
 
@@ -1027,18 +1151,114 @@ public partial class MainWindow : Window
         theme.Items.Add(DocumentView.MenuItemFor("Dark", null, () => SetTheme("Dark"), isChecked: current == "Dark"));
         menu.Items.Add(theme);
 
+        menu.Items.Add(new Separator());
+        menu.Items.Add(DocumentView.MenuItemFor("Check for updates…", "", () => _ = CheckForUpdatesNowAsync()));
+        menu.Items.Add(DocumentView.MenuItemFor("Check for updates automatically", null, ToggleAutomaticUpdates,
+            isChecked: AppSettings.Current.CheckForUpdates));
         menu.Items.Add(DocumentView.MenuItemFor("Keyboard shortcuts", "", ShowShortcuts));
         menu.Items.Add(DocumentView.MenuItemFor("About PDFPlus", "", ShowAbout));
         menu.Closed += (_, _) => UpdateChrome();
         menu.IsOpen = true;
     }
 
+    // ---------------------------------------------------------------- updates
+
+    /// <summary>
+    /// The quiet check when the app starts: at most once a day, nothing on screen unless there is a new
+    /// version, and silent when the network isn't reachable.
+    /// </summary>
+    private async Task CheckForUpdatesAtStartupAsync()
+    {
+        var settings = AppSettings.Current;
+        if (!settings.CheckForUpdates) return;
+        if (DateTime.UtcNow - settings.LastUpdateCheck < UpdateService.CheckInterval) return;
+
+        var result = await UpdateService.CheckAsync(CancellationToken.None);
+        if (result.Status == UpdateCheckStatus.Failed) return;
+
+        settings.LastUpdateCheck = DateTime.UtcNow;
+        settings.Save();
+
+        if (result.Update is not { } update) return;
+        if (settings.SkippedVersion == update.Version.ToString()) return;
+        OfferUpdate(update);
+    }
+
+    /// <summary>"Check for updates" from the menu: always looks, and always reports what it found.</summary>
+    private async Task CheckForUpdatesNowAsync()
+    {
+        var result = await UpdateService.CheckAsync(CancellationToken.None);
+        var settings = AppSettings.Current;
+        if (result.Status != UpdateCheckStatus.Failed)
+        {
+            settings.LastUpdateCheck = DateTime.UtcNow;
+            settings.Save();
+        }
+
+        switch (result.Status)
+        {
+            case UpdateCheckStatus.Failed:
+                UpdateDialog.ShowCheckFailed(this);
+                break;
+            case UpdateCheckStatus.UpToDate:
+                UpdateDialog.ShowUpToDate(this);
+                break;
+            // Asking for an update explicitly overrides having skipped this version earlier.
+            case UpdateCheckStatus.UpdateAvailable when result.Update is { } update:
+                OfferUpdate(update);
+                break;
+        }
+    }
+
+    private void OfferUpdate(UpdateInfo update)
+    {
+        var outcome = UpdateDialog.Show(this, update);
+        var settings = AppSettings.Current;
+
+        if (outcome.Error is { } error)
+        {
+            Dialogs.Error(this, "The update couldn't be downloaded",
+                $"{error}\n\nYou can download it yourself from {UpdateService.ReleasesUrl}.");
+            return;
+        }
+
+        if (outcome.Skip)
+        {
+            settings.SkippedVersion = update.Version.ToString();
+            settings.Save();
+            return;
+        }
+
+        if (outcome.InstallerPath is not { } installer) return;
+
+        if (Dialogs.Ask(this, "Install the update now?",
+                "PDFPlus will close so Windows can install the new version. " +
+                "Any unsaved changes are offered for saving first.",
+                "Close and install", null) != AskResult.Primary) return;
+
+        // OnWindowClosing starts the installer, but only once it knows the close wasn't cancelled.
+        _pendingInstaller = installer;
+        Close();
+        _pendingInstaller = null;
+    }
+
+    private void ToggleAutomaticUpdates()
+    {
+        var settings = AppSettings.Current;
+        settings.CheckForUpdates = !settings.CheckForUpdates;
+        settings.SkippedVersion = "";
+        settings.Save();
+    }
+
     private void OnAboutClick(object sender, RoutedEventArgs e) => ShowAbout();
 
-    private void ShowAbout() => Dialogs.Info(this, "PDFPlus 1.0",
+    private void ShowAbout() => Dialogs.Info(this, $"PDFPlus {UpdateService.CurrentVersion.ToString(3)}",
         "A fast, free PDF viewer and editor.\n\n" +
-        "No accounts, no subscriptions, no telemetry. Your files never leave this computer.\n\n" +
-        "PDF rendering by PDFium, the engine behind Chrome's PDF viewer (BSD-3-Clause license).",
+        "No accounts, no subscriptions, no telemetry. Your files never leave this computer. " +
+        "The only thing PDFPlus sends over the network is a check for a newer version, " +
+        "which you can turn off in this menu.\n\n" +
+        "PDF rendering by PDFium, the engine behind Chrome's PDF viewer (BSD-3-Clause license). " +
+        "Text in pictures is read by the OCR engine built into Windows, on this computer.",
         "About PDFPlus");
 
     private void ShowShortcuts() => ShortcutsDialog.Show(this);

@@ -120,12 +120,14 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
             {
                 _document.PagesChanged -= OnPagesChanged;
                 _document.PageContentChanged -= OnPageContentChanged;
+                _document.TextLayerChanged -= OnTextLayerChanged;
             }
             _document = value;
             if (_document != null)
             {
                 _document.PagesChanged += OnPagesChanged;
                 _document.PageContentChanged += OnPageContentChanged;
+                _document.TextLayerChanged += OnTextLayerChanged;
             }
             _offset = new Point();
             ClearSelection();
@@ -358,6 +360,13 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
         ResetPages();
         if (_fitMode != FitMode.None) ApplyFit();
         RestoreAnchor(anchor);
+    }
+
+    /// <summary>A page's text was recovered by OCR, so any character indexes we were holding now mean something else.</summary>
+    private void OnTextLayerChanged(object? sender, int index)
+    {
+        ClearSelection();
+        QueueUpdate();
     }
 
     private void OnPageContentChanged(object? sender, int index)
@@ -852,6 +861,12 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
     /// </summary>
     public Func<PageHit, int, bool>? PreviewPageClick { get; set; }
 
+    /// <summary>
+    /// Raised when the user tries to select text on a page whose own text layer can't be read. The host is
+    /// expected to run OCR for that page; until it does, there is nothing meaningful to select.
+    /// </summary>
+    public event EventHandler<int>? TextRecoveryNeeded;
+
     /// <summary>Wheel handling shared with overlays: Ctrl zooms at the pointer, Shift scrolls sideways.</summary>
     public void ScrollByWheel(int delta, Point position)
     {
@@ -931,6 +946,17 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
             _drag = DragMode.Link;
             _dragStart = p;
             CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
+        // A page whose text layer is unusable has to be read by OCR before selection means anything. Pan for now:
+        // the host starts the recovery and the drag works on the next attempt.
+        if (Tool == ViewTool.Select && _document.NeedsTextRecovery(h.PageIndex))
+        {
+            TextRecoveryNeeded?.Invoke(this, h.PageIndex);
+            ClearSelection();
+            BeginPan(p);
             e.Handled = true;
             return;
         }

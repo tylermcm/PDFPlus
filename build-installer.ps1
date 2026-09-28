@@ -12,17 +12,20 @@ $dist = Join-Path $root 'dist'
 if (Test-Path $work) { Remove-Item $work -Recurse -Force }
 New-Item -ItemType Directory -Force $publish, $art, $msiOut, $dist | Out-Null
 
-# Installed build: native libraries sit beside the exe and the bundle isn't compressed, so it starts faster than the
-# portable exe. The MSI compresses everything anyway.
+# Ordinary files, not a packed single-file exe; see the note in PDFPlus.csproj for why that matters to startup.
 dotnet publish (Join-Path $root 'src\PDFPlus\PDFPlus.csproj') -c Release -r win-x64 --self-contained true `
-    -p:IncludeNativeLibrariesForSelfExtract=false -p:EnableCompressionInSingleFile=false -o $publish -nologo
+    -o $publish -nologo
 if ($LASTEXITCODE -ne 0) { throw "Publish failed" }
 
-# Package.wxs lists the files explicitly; fail loudly if a dependency update added or removed one.
-$expected = 'D3DCompiler_47_cor3.dll', 'pdfium.dll', 'PDFPlus.exe', 'PenImc_cor3.dll', 'PresentationNative_cor3.dll', 'vcruntime140_cor3.dll', 'wpfgfx_cor3.dll'
-$actual = Get-ChildItem $publish -File | Where-Object Extension -ne '.pdb' | ForEach-Object Name
-$difference = Compare-Object ($expected | Sort-Object) ($actual | Sort-Object)
-if ($difference) { throw "Published files changed; update installer\Package.wxs:`n$($difference | Out-String)" }
+# Package.wxs picks the files up as a set, so only the things it names by hand need checking here.
+$files = Get-ChildItem $publish -File | Where-Object Extension -ne '.pdb'
+foreach ($required in 'PDFPlus.exe', 'pdfium.dll', 'wpfgfx_cor3.dll') {
+    if ($files.Name -notcontains $required) { throw "$required is missing from the publish output" }
+}
+if ($files.Count -lt 100) { throw "Only $($files.Count) files published; expected the whole self-contained runtime" }
+if (Get-ChildItem $publish -Directory) { throw "The publish output has subfolders; installer\Package.wxs installs a flat folder" }
+"published $($files.Count) files"
+
 
 & (Join-Path $root 'tools\make-installer-art.ps1') -Icon (Join-Path $root 'src\PDFPlus\Assets\PDFPlus.ico') -OutDir $art
 

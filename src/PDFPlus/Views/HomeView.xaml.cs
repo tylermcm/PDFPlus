@@ -160,9 +160,10 @@ public partial class HomeView : UserControl
 
     public HomeView()
     {
-        InitializeComponent();
+        Services.Timeline.Measure("    home xaml parsed", InitializeComponent);
         Logo.Source = AppIcon.Get(128);
         foreach (var tool in Tools) ToolGrid.Children.Add(MakeToolCard(tool));
+        Services.Timeline.Mark("    home tool cards built");
         AllFilter.IsChecked = true;
         ShowTip(0);
         SizeChanged += (_, _) => UpdateForWidth();
@@ -255,17 +256,17 @@ public partial class HomeView : UserControl
             if (!Previews.TryGetValue(key, out var preview))
             {
                 var path = item.FullPath;
-                preview = await Task.Run(() =>
+                try
                 {
-                    try
-                    {
-                        return PdfThumbnail.Render(path, width, height);
-                    }
-                    catch
-                    {
-                        return new PdfPreview(null, 0, false);
-                    }
-                });
+                    // Text previews draw with WPF, which needs this thread; PDFs render off it.
+                    preview = TextDocument.Handles(path)
+                        ? TextThumbnail.Render(path, width, height)
+                        : await Task.Run(() => PdfThumbnail.Render(path, width, height));
+                }
+                catch
+                {
+                    preview = new PdfPreview(null, 0, false);
+                }
                 Previews[key] = preview;
             }
             item.SetPreview(preview);
