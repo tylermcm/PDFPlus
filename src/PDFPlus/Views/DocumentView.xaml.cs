@@ -114,7 +114,7 @@ public partial class DocumentView : UserControl, IDisposable
         Edits.Message += (_, message) => ShowToast(message);
         Edits.SelectionChanged += (_, _) => RaiseStatus();
         Edits.AddImageRequested += (_, hit) => AddImage(hit);
-        Edits.AddTextRequested += (_, hit) => StartTextBox(hit);
+        Edits.AddTextRequested += (_, request) => StartTextBox(request.Hit, request.DisplaySize);
 
         _thumbTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _thumbTimer.Tick += (_, _) => FlushThumbnails();
@@ -821,10 +821,16 @@ public partial class DocumentView : UserControl, IDisposable
     }
 
     /// <summary>Starts a text box on a page. It stays editable until you click away, then becomes PDF text.</summary>
-    internal void StartTextBox(PageHit hit)
+    internal void StartTextBox(PageHit hit) => StartTextBox(hit, Size.Empty);
+
+    internal void StartTextBox(PageHit hit, Size displayBox)
     {
         PlacementHint.Visibility = Visibility.Collapsed;
-        Stamps.Place(StampKind.Text, hit, null);
+        // Copy the look of the text you started next to, so new text doesn't stand out.
+        var style = Document.TextStyleAt(hit.PageIndex, hit.Display);
+        Stamps.PlaceText(hit, displayBox, style);
+        if (style?.Font is { } look)
+            ShowToast($"Typing in {look.Family}{(look.Bold ? " Bold" : "")} {style.FontSize:0.#} pt, copied from the text next to it");
         RaiseStatus();
     }
 

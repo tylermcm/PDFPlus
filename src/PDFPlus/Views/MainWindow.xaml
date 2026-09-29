@@ -230,7 +230,7 @@
                             </StackPanel>
                         </Button>
                         <Border />
-                        <TextBlock Text="Click text to retype it  ·  Add text to type somewhere new  ·  drag to move  ·  drag a corner to resize  ·  Del removes"
+                        <TextBlock Text="Click text to retype it  ·  Add text, then drag out a box to type in  ·  drag to move  ·  drag a corner to resize  ·  Del removes"
                                    VerticalAlignment="Center" Margin="4,0" FontSize="12" Foreground="{DynamicResource Brush.TextDim}" />
                     </StackPanel>
 

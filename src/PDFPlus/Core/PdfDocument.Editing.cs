@@ -510,7 +510,135 @@ public sealed unsafe partial class PdfDocument
         });
     }
 
+    // ---------------------------------------------------------------- new text
+
+    /// <summary>
+    /// The text run nearest a point on the page, used to copy a font onto new text. Null when there's no text within
+    /// <paramref name="radius"/> page points, which is the case on scans, images and empty areas.
+    /// </summary>
+    public PageObjectInfo? TextStyleAt(int index, Point display, double radius = 48)
+    {
+        if ((uint)index >= (uint)PageCount) return null;
+        var point = GetPageToDisplay(index).Invert().Transform(display);
+        PageObjectInfo? best = null;
+        var nearest = double.MaxValue;
+        foreach (var run in GetPageObjects(index))
+        {
+            if (!run.IsText || run.FontSize < 1) continue;
+            var bounds = run.Bounds;
+            var dx = Math.Max(0, Math.Max(bounds.X - point.X, point.X - bounds.Right));
+            var dy = Math.Max(0, Math.Max(bounds.Y - point.Y, point.Y - bounds.Bottom));
+            var distance = Math.Sqrt(dx * dx + dy * dy);
+            if (distance > radius || distance >= nearest) continue;
+            nearest = distance;
+            best = run;
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Writes new lines of text onto a page. When <paramref name="styleFrom"/> is given, that text's own font is reused if it
+    /// can spell the new text; otherwise a subset of the matching Windows font is embedded, falling back to Helvetica.
+    /// <paramref name="displayTransform"/> is applied in display space, which is how a rotated text box is written out.
+    /// </summary>
+    public TextEditResult AddStyledText(int index, IReadOnlyList<TextRun> runs, double fontSize, Color color,
+        Affine displayTransform, PageObjectInfo? styleFrom)
+    {
+        var lines = runs.Where(r => !string.IsNullOrWhiteSpace(r.Text)).ToList();
+        if (lines.Count == 0) return new TextEditResult(TextFontOutcome.Removed, "");
+        var look = styleFrom?.Font;
+        var all = string.Concat(lines.Select(l => l.Text));
+        var result = new TextEditResult(TextFontOutcome.SubstituteFont, "Helvetica");
+
+        EditObjects(index, (doc, page) =>
+        {
+            var displayToPage = PageToDisplayLocked(index).Invert();
+            var reuse = IntPtr.Zero;
+            if (look != null && styleFrom != null && ResolveObjectsLocked(page, styleFrom) is { Length: > 0 } existing)
+            {
+                var font = FPDFTextObj_GetFont(existing[0]);
+                if (font != IntPtr.Zero && CanReuseFontLocked(page, font, look, (float)fontSize, all)) reuse = font;
+            }
+
+            if (reuse != IntPtr.Zero && WriteLinesLocked(doc, page, reuse, lines, fontSize, color, displayTransform, displayToPage, verify: true))
+            {
+                result = new TextEditResult(TextFontOutcome.OriginalFont, look!.Family);
+                return;
+            }
+
+            var wanted = look ?? FontLook.Default;
+            if (FontResolver.CreateEmbeddableFont(wanted, all) is { } embeddable)
+            {
+                var loaded = IntPtr.Zero;
+                try
+                {
+                    fixed (byte* data = embeddable.Data)
+                        loaded = FPDFText_LoadFont(doc, data, (uint)embeddable.Data.Length, FPDF_FONT_TRUETYPE, 1);
+                    if (loaded != IntPtr.Zero &&
+                        WriteLinesLocked(doc, page, loaded, lines, fontSize, color, displayTransform, displayToPage, verify: false))
+                    {
+                        var same = string.Equals(embeddable.Family, wanted.Family, StringComparison.OrdinalIgnoreCase);
+                        result = new TextEditResult(same ? TextFontOutcome.MatchingFont : TextFontOutcome.SubstituteFont, embeddable.Family);
+                        return;
+                    }
+                }
+                finally
+                {
+                    if (loaded != IntPtr.Zero) FPDFFont_Close(loaded);
+                }
+            }
+
+            // Last resort: a font every PDF reader has built in.
+            foreach (var line in lines) WriteLineLocked(doc, page, IntPtr.Zero, line, fontSize, color, displayTransform, displayToPage);
+            result = new TextEditResult(TextFontOutcome.SubstituteFont, "Helvetica");
+        });
+        return result;
+    }
+
+    private static bool WriteLinesLocked(IntPtr doc, IntPtr page, IntPtr font, List<TextRun> lines, double fontSize, Color color,
+        Affine displayTransform, Affine displayToPage, bool verify)
+    {
+        var written = new List<IntPtr>();
+        foreach (var line in lines)
+        {
+            var obj = WriteLineLocked(doc, page, font, line, fontSize, color, displayTransform, displayToPage);
+            if (obj != IntPtr.Zero) written.Add(obj);
+        }
+        if (written.Count == 0) return false;
+        if (!verify) return true;
+
+        // Read the first line back: a character the font can't encode comes back different.
+        var textPage = FPDFText_LoadPage(page);
+        var ok = textPage != IntPtr.Zero && Collapse(ObjectText(written[0], textPage)) == Collapse(lines[0].Text);
+        if (textPage != IntPtr.Zero) FPDFText_ClosePage(textPage);
+        if (ok) return true;
+        foreach (var obj in written)
+        {
+            FPDFPage_RemoveObject(page, obj);
+            FPDFPageObj_Destroy(obj);
+        }
+        return false;
+    }
+
+    private static IntPtr WriteLineLocked(IntPtr doc, IntPtr page, IntPtr font, TextRun line, double fontSize, Color color,
+        Affine displayTransform, Affine displayToPage)
+    {
+        var obj = font != IntPtr.Zero
+            ? FPDFPageObj_CreateTextObj(doc, font, (float)fontSize)
+            : FPDFPageObj_NewTextObj(doc, "Helvetica", (float)fontSize);
+        if (obj == IntPtr.Zero) return IntPtr.Zero;
+        FPDFText_SetText(obj, line.Text);
+        FPDFPageObj_SetFillColor(obj, color.R, color.G, color.B, color.A);
+        // Text space is y-up: flip at the baseline, place it in display space, then map onto the page.
+        var m = new Affine(1, 0, 0, -1, line.X, line.Baseline).Then(displayTransform).Then(displayToPage);
+        var matrix = new FS_MATRIX { a = (float)m.A, b = (float)m.B, c = (float)m.C, d = (float)m.D, e = (float)m.E, f = (float)m.F };
+        FPDFPageObj_SetMatrix(obj, &matrix);
+        FPDFPage_InsertObject(page, obj);
+        return obj;
+    }
+
     // ---------------------------------------------------------------- adding images
+
 
     /// <summary>
     /// Adds a picture centred on a display point, at its natural size but no more than half the page.

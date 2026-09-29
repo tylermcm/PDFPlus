@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -10,6 +10,9 @@ using PDFPlus.Core;
 
 namespace PDFPlus.Views;
 
+/// <summary>Where a new text box goes. An empty size means it grows with what's typed.</summary>
+public sealed record TextBoxRequest(PageHit Hit, Size DisplaySize);
+
 /// <summary>
 /// Overlay for Edit mode: outlines text and images under the mouse, retypes a line of text in place,
 /// drags objects to move them, resizes images from their corners, and deletes the selection.
@@ -19,12 +22,14 @@ public sealed class EditLayer : Canvas
     private const double DragThreshold = 4;
     private const double HandleReach = 7;
 
-    private enum DragKind { None, Pending, Move, Resize }
+    private enum DragKind { None, Pending, Move, Resize, NewText }
 
     private PdfView? _view;
     private PdfDocument? _document;
     private bool _active;
     private bool _textTool;
+    private int _textPage;
+    private Point _textEnd;
     private readonly Dictionary<int, List<PageObjectInfo>> _cache = new();
 
     private PageObjectInfo? _hover;
@@ -45,7 +50,7 @@ public sealed class EditLayer : Canvas
     /// <summary>Short status messages for the toast.</summary>
     public event EventHandler<string>? Message;
     public event EventHandler<PageHit>? AddImageRequested;
-    public event EventHandler<PageHit>? AddTextRequested;
+    public event EventHandler<TextBoxRequest>? AddTextRequested;
     public event EventHandler? SelectionChanged;
 
     public EditLayer()
@@ -192,8 +197,16 @@ public sealed class EditLayer : Canvas
 
         if (_textTool)
         {
-            TextTool = false;
-            if (Hit(position) is { } spot) AddTextRequested?.Invoke(this, spot);
+            if (Hit(position) is { } spot)
+            {
+                _textPage = spot.PageIndex;
+                _textEnd = position;
+                StartDrag(DragKind.NewText, position);
+            }
+            else
+            {
+                TextTool = false;
+            }
             return;
         }
 
@@ -226,6 +239,18 @@ public sealed class EditLayer : Canvas
         StartDrag(DragKind.Pending, position);
     }
 
+    /// <summary>A drag becomes a text box of that size; a click becomes one that grows with the text.</summary>
+    private void CreateTextBox(Point end)
+    {
+        if (_view == null || _document == null || (uint)_textPage >= (uint)_document.PageCount) return;
+        var start = DisplayOnPage(_textPage, _dragStart);
+        var box = new Rect(start, DisplayOnPage(_textPage, end));
+        var request = box.Width < 12 || box.Height < 8
+            ? new TextBoxRequest(new PageHit(_textPage, start), Size.Empty)
+            : new TextBoxRequest(new PageHit(_textPage, box.TopLeft), new Size(box.Width, box.Height));
+        AddTextRequested?.Invoke(this, request);
+    }
+
     private void StartDrag(DragKind kind, Point position)
     {
         HideSelectionBar();
@@ -242,6 +267,10 @@ public sealed class EditLayer : Canvas
         var position = e.GetPosition(this);
         switch (_drag)
         {
+            case DragKind.NewText:
+                _textEnd = position;
+                InvalidateVisual();
+                return;
             case DragKind.Pending when (position - _dragStart).Length >= DragThreshold:
                 _drag = DragKind.Move;
                 goto case DragKind.Move;
@@ -317,6 +346,13 @@ public sealed class EditLayer : Canvas
         _drag = DragKind.None;
         if (IsMouseCaptured) ReleaseMouseCapture();
         e.Handled = true;
+        if (drag == DragKind.NewText)
+        {
+            TextTool = false;
+            CreateTextBox(e.GetPosition(this));
+            InvalidateVisual();
+            return;
+        }
         if (_selected is not { } target || _document == null || !IsValid(target))
         {
             InvalidateVisual();
@@ -380,7 +416,7 @@ public sealed class EditLayer : Canvas
         if (hit is { } where)
         {
             if (menu.Items.Count > 0) menu.Items.Add(new Separator());
-            menu.Items.Add(DocumentView.MenuItemFor("Add text here", "", () => AddTextRequested?.Invoke(this, where)));
+            menu.Items.Add(DocumentView.MenuItemFor("Add text here", "", () => AddTextRequested?.Invoke(this, new TextBoxRequest(where, Size.Empty))));
             menu.Items.Add(DocumentView.MenuItemFor("Add image here…", "\uEB9F", () => AddImageRequested?.Invoke(this, where)));
         }
         if (menu.Items.Count > 0) menu.IsOpen = true;
@@ -670,6 +706,12 @@ public sealed class EditLayer : Canvas
         var tint = new SolidColorBrush(Color.FromArgb(36, accent.Color.R, accent.Color.G, accent.Color.B));
         var dashed = new Pen(accent, 1) { DashStyle = new DashStyle([3, 3], 0) };
         var solid = new Pen(accent, 1.5);
+
+        if (_drag == DragKind.NewText)
+        {
+            dc.DrawRectangle(tint, dashed, new Rect(_dragStart, _textEnd));
+            return;
+        }
 
         if (_hover != null && !ReferenceEquals(_hover, _selected) && _drag == DragKind.None && IsValid(_hover))
             dc.DrawGeometry(null, dashed, Polygon(LayerCorners(_hover, padding: 2)));

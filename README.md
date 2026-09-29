@@ -43,8 +43,14 @@ No account, no subscription.
 - Extract a page range to a new PDF, split a document every N pages, combine several PDFs into one
 
 **Edit** (toolbar → Edit, or press E)
-- Add text: click "Add text" (or press T, or right-click a page → Add text here), then click where you want to
-  type. The box stays movable and resizable while you type, and becomes real PDF text when you click away
+- Add text: click "Add text" (or press T, or right-click a page → Add text here), then drag out a box on the page
+  (a single click makes one that grows as you type). Text wraps inside the box
+- While it's open: drag the round corner handles to resize it, drag the handle below it to turn it (hold Shift for
+  15 degree steps), drag the move button to reposition, and set size and colour from its toolbar
+- The font is copied from the text you started next to, including bold, italic and size. That font is reused in the
+  PDF when it can spell what you typed, otherwise the matching Windows font is embedded as a subset. With no text
+  nearby (a scan, a blank area) it falls back to the default
+- It becomes real PDF text when you click away, so it can be retyped, moved or deleted like any other text
 - Click a line of text and retype it in place; Enter saves, Esc cancels, empty text deletes the line
 - Keeps the position, size and color. The PDF's own font is reused when it has every character you type;
   otherwise the matching Windows font (e.g. Calibri) is embedded as a small subset, usually a few tens of KB

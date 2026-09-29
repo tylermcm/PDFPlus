@@ -221,6 +221,18 @@ internal static class UiTest
             view.CommitStamps();
             await Settle(1200);
 
+            view.SetTextBoxTool(true);
+            await Settle(300);
+            view.StartTextBox(new PageHit(0, new Point(96, 360)), new Size(250, 64));
+            await Settle(400);
+            if (FindDescendant<TextBox>(view.Stamps) is { } boxed) boxed.Text = "A dragged box wraps the text inside it, and can be turned.";
+            view.Stamps.SetLiveAngle(-8);
+            await Settle(500);
+            Snap(window, "19d-text-box-handles");
+            view.CommitStamps();
+            await Settle(1200);
+            Snap(window, "19e-text-box-written");
+
             var realWorld = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input))!, "edit-sample.pdf");
             if (File.Exists(realWorld))
             {

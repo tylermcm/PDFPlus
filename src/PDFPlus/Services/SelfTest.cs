@@ -190,6 +190,7 @@ internal static class SelfTest
 
             // ---- Home: images to PDF, previews
             ImagesToPdfTests(input, outputDirectory, Check);
+            await TextBoxTestsAsync(input, outputDirectory, Check);
             await TextTestsAsync(outputDirectory, Check);
             await DocxTestsAsync(input, outputDirectory, Check, log);
         }
@@ -523,6 +524,59 @@ internal static class SelfTest
         }
 
         static string Normalise(string text) => string.Join(" ", text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    /// <summary>New text boxes: the font copied from the page, reuse of that font, and rotation.</summary>
+    private static async Task TextBoxTestsAsync(string input, string outputDirectory, Action<string, bool, string> check)
+    {
+        var none = CancellationToken.None;
+        var samplePath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input))!, "edit-sample.pdf");
+        if (!File.Exists(samplePath))
+        {
+            check("text boxes (tests/edit-sample.pdf missing)", false, "");
+            return;
+        }
+
+        using var doc = await PdfDocument.OpenAsync(samplePath, null);
+        var invoice = doc.GetPageObjects(0).First(o => o.IsText && o.Text.StartsWith("Invoice"));
+        var display = doc.GetPageToDisplay(0).TransformBounds(invoice.Bounds);
+
+        var style = doc.TextStyleAt(0, new Point(display.X + 20, display.Bottom + 10));
+        check("text style: copies the font of the nearest text",
+            style?.Font?.Family == "Calibri" && Math.Abs(style.FontSize - invoice.FontSize) < 0.1,
+            $"{style?.Font?.Family} {style?.FontSize:0.#} pt");
+        var pageSize = doc.PageSizes[0];
+        check("text style: nothing to copy far from any text",
+            doc.TextStyleAt(0, new Point(pageSize.Width - 30, pageSize.Height - 30)) == null, "");
+
+        // Only characters the page already draws in that font, so its own subset can spell them.
+        var reused = doc.AddStyledText(0, [new TextRun("Invoice number INV 10442", display.X, display.Bottom + 26)],
+            style!.FontSize, Colors.Black, Affine.Identity, style);
+        check("text box: reuses the page's font", reused.Outcome == TextFontOutcome.OriginalFont && reused.FontFamily == "Calibri", reused.ToString());
+        check("text box: the new text is searchable", doc.Search("Invoice number INV 10442", false, false, none).Count == 1, "");
+
+        var center = new Point(display.X + 70, display.Bottom + 90);
+        const double degrees = 30;
+        var radians = degrees * Math.PI / 180;
+        var rotation = Affine.Translation(-center.X, -center.Y)
+            .Then(new Affine(Math.Cos(radians), Math.Sin(radians), -Math.Sin(radians), Math.Cos(radians), 0, 0))
+            .Then(Affine.Translation(center.X, center.Y));
+        doc.AddStyledText(0, [new TextRun("Rotated thirty degrees", center.X, center.Y)], 12, Colors.Black, rotation, null);
+        var rotated = doc.GetPageObjects(0).FirstOrDefault(o => o.IsText && o.Text.StartsWith("Rotated thirty"));
+        var tilt = rotated == null ? 0 : Math.Abs(Math.Atan2(rotated.U.Y, rotated.U.X) * 180 / Math.PI);
+        check("text box: rotation is written into the PDF", rotated != null && Math.Abs(tilt - degrees) < 1.5, $"{tilt:0.#} degrees");
+
+        var unicode = doc.AddStyledText(0, [new TextRun("Nowy tekst: Łukasz", display.X, display.Bottom + 140)],
+            style.FontSize, Colors.Black, Affine.Identity, style);
+        check("text box: embeds a font when the page's one lacks characters",
+            unicode.Outcome is TextFontOutcome.MatchingFont or TextFontOutcome.SubstituteFont && doc.Search("Łukasz", false, false, none).Count == 1,
+            unicode.ToString());
+
+        var saved = Path.Combine(outputDirectory, "text-boxes.pdf");
+        doc.Save(saved);
+        using var reopened = await PdfDocument.OpenAsync(saved, null);
+        check("text box: survives saving", reopened.Search("Rotated thirty degrees", false, false, none).Count == 1, "");
+        SavePng(RenderFull(reopened, 0), Path.Combine(outputDirectory, "text-boxes.png"));
     }
 
     private static BitmapSource RenderFull(PdfDocument doc, int page)
