@@ -13,7 +13,7 @@
     <RootNamespace>PDFPlus</RootNamespace>
     <AssemblyName>PDFPlus</AssemblyName>
     <Product>PDFPlus</Product>
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
     <Copyright>Free forever. No subscriptions.</Copyright>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\PDFPlus.ico</ApplicationIcon>
