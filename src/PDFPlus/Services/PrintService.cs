@@ -1,3 +1,4 @@
+using System.Printing;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -33,8 +34,36 @@ public static class PrintService
         if (pages.Count == 0) return;
 
         var paper = new Size(dialog.PrintableAreaWidth, dialog.PrintableAreaHeight);
-        dialog.PrintDocument(new Paginator(document, pages, paper), document.Title);
+        dialog.PrintDocument(CreatePaginator(document, pages, paper), document.Title);
     }
+
+    /// <summary>
+    /// Prints every page with no dialog at all, for the shell's Quick Print verbs.
+    /// A null printer name means the user's default printer.
+    /// </summary>
+    public static void PrintSilently(PdfDocument document, string? printerName)
+    {
+        if (document.PageCount == 0) throw new InvalidOperationException("This PDF has no pages to print.");
+        var dialog = new PrintDialog();
+        if (!string.IsNullOrWhiteSpace(printerName))
+            dialog.PrintQueue = FindQueue(printerName) ?? throw new InvalidOperationException($"The printer \"{printerName}\" isn't available.");
+
+        var paper = new Size(dialog.PrintableAreaWidth, dialog.PrintableAreaHeight);
+        var pages = Enumerable.Range(0, document.PageCount).ToList();
+        dialog.PrintDocument(CreatePaginator(document, pages, paper), document.Title);
+    }
+
+    private static PrintQueue? FindQueue(string name)
+    {
+        using var server = new LocalPrintServer();
+        var queues = server.GetPrintQueues([EnumeratedPrintQueueTypes.Local, EnumeratedPrintQueueTypes.Connections]);
+        return queues.FirstOrDefault(queue => string.Equals(queue.FullName, name, StringComparison.OrdinalIgnoreCase)
+                                              || string.Equals(queue.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Lays the pages out on paper; exposed so the self-test can check printing without a printer.</summary>
+    internal static DocumentPaginator CreatePaginator(PdfDocument document, List<int> pages, Size paper) =>
+        new Paginator(document, pages, paper);
 
     private sealed class Paginator(PdfDocument document, List<int> pages, Size paper) : DocumentPaginator
     {

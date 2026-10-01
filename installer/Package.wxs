@@ -89,6 +89,12 @@
         <RegistryKey Key="shell\open\command">
           <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot; &quot;%1&quot;" />
         </RegistryKey>
+        <RegistryKey Key="shell\print\command">
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot; --print &quot;%1&quot;" />
+        </RegistryKey>
+        <RegistryKey Key="shell\printto\command">
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot; --printto &quot;%1&quot; &quot;%2&quot;" />
+        </RegistryKey>
       </RegistryKey>
       <RegistryValue Root="HKLM" Key="Software\Classes\.pdf\OpenWithProgids" Name="PDFPlus.Document" Type="string" Value="" />
 
@@ -99,6 +105,12 @@
         </RegistryKey>
         <RegistryKey Key="shell\open\command">
           <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot; &quot;%1&quot;" />
+        </RegistryKey>
+        <RegistryKey Key="shell\print\command">
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot; --print &quot;%1&quot;" />
+        </RegistryKey>
+        <RegistryKey Key="shell\printto\command">
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]PDFPlus.exe&quot; --printto &quot;%1&quot; &quot;%2&quot;" />
         </RegistryKey>
       </RegistryKey>
 

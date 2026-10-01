@@ -129,6 +129,7 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
                 _document.PageContentChanged += OnPageContentChanged;
                 _document.TextLayerChanged += OnTextLayerChanged;
             }
+            StopAutoScroll();
             _offset = new Point();
             ClearSelection();
             SetSearchHits([], -1);
@@ -764,7 +765,11 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
     protected override void OnRender(DrawingContext dc)
     {
         dc.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
-        if (_document == null || _layout.Length == 0) return;
+        if (_document == null || _layout.Length == 0)
+        {
+            if (_autoScroll) DrawAutoScrollMarker(dc);
+            return;
+        }
 
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         var (first, last) = VisibleRange(0);
@@ -792,6 +797,8 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
 
             DrawOverlays(dc, i, rect);
         }
+
+        if (_autoScroll) DrawAutoScrollMarker(dc);
     }
 
     private void DrawOverlays(DrawingContext dc, int page, Rect pageRect)
@@ -846,6 +853,121 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
         return new Point((viewportPoint.X - r.X) / Scale, (viewportPoint.Y - r.Y) / Scale);
     }
 
+    // ---------------------------------------------------------------- autoscroll (middle click)
+
+    private const double AutoScrollDeadZone = 14;   // pixels of slack around the origin
+    private const double AutoScrollGain = 7;        // pixels per second of scrolling, per pixel past the dead zone
+    private const double AutoScrollMaxSpeed = 2600; // pixels per second
+
+    private bool _autoScroll;
+    private Point _autoOrigin;
+    private Point _autoPointer;
+    private bool _autoMoved;
+    private DispatcherTimer? _autoTimer;
+    private long _autoLastTick;
+
+    public bool AutoScrolling => _autoScroll;
+
+    /// <summary>
+    /// Starts the middle-click scroll: the page scrolls towards the pointer, faster the further away it is.
+    /// Click again (or press Escape) to stop; dragging away and releasing the middle button stops it too.
+    /// </summary>
+    public void StartAutoScroll(Point viewportPoint)
+    {
+        if (_document == null || _document.PageCount == 0) return;
+        _autoScroll = true;
+        _autoMoved = false;
+        _autoOrigin = _autoPointer = viewportPoint;
+        _autoLastTick = Environment.TickCount64;
+        _autoTimer ??= new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(16) };
+        _autoTimer.Tick -= OnAutoScrollTick;
+        _autoTimer.Tick += OnAutoScrollTick;
+        _autoTimer.Start();
+        Focus();
+        CaptureMouse();
+        Cursor = Cursors.ScrollAll;
+        InvalidateVisual();
+    }
+
+    /// <summary>Test hook: pretends the pointer moved, the way the mouse does while the scroller runs.</summary>
+    internal void SetAutoScrollPointerForTest(Point viewportPoint)
+    {
+        _autoPointer = viewportPoint;
+        UpdateAutoScrollCursor();
+        InvalidateVisual();
+    }
+
+    public void StopAutoScroll()
+    {
+        if (!_autoScroll) return;
+        _autoScroll = false;
+        _autoTimer?.Stop();
+        if (IsMouseCaptured) ReleaseMouseCapture();
+        Cursor = Cursors.Arrow;
+        InvalidateVisual();
+    }
+
+    private void OnAutoScrollTick(object? sender, EventArgs e)
+    {
+        var now = Environment.TickCount64;
+        var seconds = Math.Clamp((now - _autoLastTick) / 1000.0, 0, 0.1);
+        _autoLastTick = now;
+        if (!_autoScroll || _document == null) return;
+
+        var dx = AutoScrollSpeed(_autoPointer.X - _autoOrigin.X) * seconds;
+        var dy = AutoScrollSpeed(_autoPointer.Y - _autoOrigin.Y) * seconds;
+        if (dx == 0 && dy == 0) return;
+        SetOffsetCore(_offset.X + dx, _offset.Y + dy);
+    }
+
+    private static double AutoScrollSpeed(double distance)
+    {
+        var past = Math.Abs(distance) - AutoScrollDeadZone;
+        if (past <= 0) return 0;
+        return Math.Sign(distance) * Math.Min(AutoScrollMaxSpeed, past * AutoScrollGain);
+    }
+
+    private void UpdateAutoScrollCursor()
+    {
+        var dx = _autoPointer.X - _autoOrigin.X;
+        var dy = _autoPointer.Y - _autoOrigin.Y;
+        var horizontal = Math.Abs(dx) > AutoScrollDeadZone;
+        var vertical = Math.Abs(dy) > AutoScrollDeadZone;
+        Cursor = (horizontal, vertical) switch
+        {
+            (false, false) => Cursors.ScrollAll,
+            (false, true) => dy < 0 ? Cursors.ScrollN : Cursors.ScrollS,
+            (true, false) => dx < 0 ? Cursors.ScrollW : Cursors.ScrollE,
+            _ => dy < 0 ? (dx < 0 ? Cursors.ScrollNW : Cursors.ScrollNE) : dx < 0 ? Cursors.ScrollSW : Cursors.ScrollSE,
+        };
+    }
+
+    /// <summary>The origin marker: a ring with four arrows, like the one Windows shows for middle-click scrolling.</summary>
+    private void DrawAutoScrollMarker(DrawingContext dc)
+    {
+        var centre = _autoOrigin;
+        var ring = new Pen(new SolidColorBrush(Color.FromArgb(150, 90, 94, 104)), 1.4);
+        dc.DrawEllipse(new SolidColorBrush(Color.FromArgb(190, 255, 255, 255)), ring, centre, 15, 15);
+        dc.DrawEllipse(new SolidColorBrush(Color.FromArgb(220, 60, 64, 72)), null, centre, 2.2, 2.2);
+
+        var arrows = new SolidColorBrush(Color.FromArgb(220, 60, 64, 72));
+        foreach (var (dx, dy) in new[] { (0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0) })
+        {
+            var tip = new Point(centre.X + dx * 11.5, centre.Y + dy * 11.5);
+            var baseCentre = new Point(centre.X + dx * 6.5, centre.Y + dy * 6.5);
+            var across = new Vector(dy, dx) * 3.4;
+            var arrow = new StreamGeometry();
+            using (var context = arrow.Open())
+            {
+                context.BeginFigure(tip, true, true);
+                context.LineTo(baseCentre + across, true, true);
+                context.LineTo(baseCentre - across, true, true);
+            }
+            arrow.Freeze();
+            dc.DrawGeometry(arrows, null, arrow);
+        }
+    }
+
     private void BeginPan(Point p)
     {
         _drag = DragMode.Pan;
@@ -883,6 +1005,7 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
     {
         base.OnPreviewMouseWheel(e);
         if (_document == null) return;
+        StopAutoScroll();
         ScrollByWheel(e.Delta, e.GetPosition(this));
         e.Handled = true;
     }
@@ -894,8 +1017,21 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
         if (_document == null) return;
         var p = e.GetPosition(this);
 
-        if (e.ChangedButton == MouseButton.Middle ||
-            (e.ChangedButton == MouseButton.Left && (Tool == ViewTool.Hand || Keyboard.IsKeyDown(Key.Space)) && !PlacementMode))
+        if (_autoScroll)
+        {
+            StopAutoScroll();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ChangedButton == MouseButton.Middle)
+        {
+            StartAutoScroll(p);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ChangedButton == MouseButton.Left && (Tool == ViewTool.Hand || Keyboard.IsKeyDown(Key.Space)) && !PlacementMode)
         {
             BeginPan(p);
             e.Handled = true;
@@ -993,6 +1129,14 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
         if (_document == null) return;
         var p = e.GetPosition(this);
 
+        if (_autoScroll)
+        {
+            _autoPointer = p;
+            if ((p - _autoOrigin).Length > AutoScrollDeadZone) _autoMoved = true;
+            UpdateAutoScrollCursor();
+            return;
+        }
+
         switch (_drag)
         {
             case DragMode.Pan:
@@ -1056,6 +1200,13 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
         base.OnMouseUp(e);
+        if (_autoScroll)
+        {
+            // Dragged away and let go: a one-shot scroll. A plain click leaves it running until the next click.
+            if (e.ChangedButton == MouseButton.Middle && _autoMoved) StopAutoScroll();
+            e.Handled = true;
+            return;
+        }
         var p = e.GetPosition(this);
         var mode = _drag;
         _drag = DragMode.None;
@@ -1082,6 +1233,7 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
     protected override void OnLostMouseCapture(MouseEventArgs e)
     {
         base.OnLostMouseCapture(e);
+        if (_autoScroll && !IsMouseCaptured) StopAutoScroll();
         if (_drag is DragMode.Pan or DragMode.Select) _drag = DragMode.None;
     }
 
@@ -1089,6 +1241,12 @@ public sealed class PdfView : FrameworkElement, IScrollInfo
     {
         base.OnKeyDown(e);
         if (_document == null || e.Handled) return;
+        if (_autoScroll && e.Key == Key.Escape)
+        {
+            StopAutoScroll();
+            e.Handled = true;
+            return;
+        }
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
 

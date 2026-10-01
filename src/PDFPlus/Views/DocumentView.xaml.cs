@@ -145,6 +145,7 @@ public partial class DocumentView : UserControl, IDisposable
             Annotations.ClearSelection();
         };
 
+        ViewerHost.PreviewMouseDown += OnViewerHostMouseDown;
         PreviewKeyDown += OnPreviewKeyDown;
         SetSidebarVisible(AppSettings.Current.SidebarVisible);
     }
@@ -872,6 +873,20 @@ public partial class DocumentView : UserControl, IDisposable
         e.Data.GetData(DataFormats.FileDrop) is string[] files
             ? files.FirstOrDefault(f => ImageExtensions.Contains(System.IO.Path.GetExtension(f).ToLowerInvariant()) && File.Exists(f))
             : null;
+
+    /// <summary>Middle click starts the scroller wherever the pointer is, even over the annotation and edit overlays.</summary>
+    private void OnViewerHostMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (View.AutoScrolling)
+        {
+            View.StopAutoScroll();
+            e.Handled = true;
+            return;
+        }
+        if (e.ChangedButton != MouseButton.Middle) return;
+        View.StartAutoScroll(e.GetPosition(View));
+        e.Handled = true;
+    }
 
     private void OnViewerDragOver(object sender, DragEventArgs e)
     {

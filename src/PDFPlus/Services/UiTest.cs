@@ -395,6 +395,16 @@ internal static class UiTest
             }
 
             // Leave the documents clean so closing the window does not prompt.
+            // Middle-click scroller: the marker stays where the click was, and the view scrolls towards the pointer.
+            // Opening the sample again just brings its tab back to the front, after the text editor tabs above.
+            await window.OpenFileAsync(input);
+            await Settle(900);
+            view.Viewer.StartAutoScroll(new Point(520, 300));
+            view.Viewer.SetAutoScrollPointerForTest(new Point(615, 415));
+            await Settle(500);
+            Snap(window, "27-autoscroll");
+            view.Viewer.StopAutoScroll();
+
             doc.Save(Path.Combine(outputDirectory, "uitest-result.pdf"));
             log.AppendLine($"saved uitest-result.pdf, pages={doc.PageCount}");
         }

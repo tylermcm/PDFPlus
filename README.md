@@ -35,7 +35,16 @@ No account, no subscription.
 - Selecting text on scanned pages, and on pages whose fonts carry no character map (where other viewers copy
   gibberish), by reading the page with the OCR engine built into Windows. It happens by itself when a page
   needs it; you can also force it from the right-click menu or read a whole document from the ⋯ menu
+- Middle-click anywhere on a page for the four-arrow scroller: the page scrolls towards the pointer, faster the
+  further away it is. Click again or press Esc to stop (drag and release the middle button for a one-shot scroll)
 - Password-protected PDFs, printing, light and dark themes
+
+**Quick print**
+- PDFPlus registers the Windows print verbs, so Outlook's Quick Print, Explorer's right-click Print and dragging a
+  PDF onto a printer send the file straight to the printer: no window, no second click
+- Needs PDFPlus set as the default PDF app (Settings > Apps > Default apps), since Windows routes those to whichever
+  app owns .pdf. Password-protected files are the one case that still asks, because they can't print without it
+- `PDFPlus.exe --print "file.pdf"` prints to the default printer; `--printto "file.pdf" "Printer name"` picks one
 
 **Page tools**
 - Reorder pages by dragging thumbnails (multi-select with Ctrl/Shift)

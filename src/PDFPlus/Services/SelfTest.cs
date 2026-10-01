@@ -191,6 +191,7 @@ internal static class SelfTest
             // ---- Home: images to PDF, previews
             ImagesToPdfTests(input, outputDirectory, Check);
             await TextBoxTestsAsync(input, outputDirectory, Check);
+            PrintTests(doc, outputDirectory, Check);
             await TextTestsAsync(outputDirectory, Check);
             await DocxTestsAsync(input, outputDirectory, Check, log);
         }
@@ -340,6 +341,23 @@ internal static class SelfTest
             check("edit sample: saved with a small font subset", growth < 80_000 && reopened.Search("INV-10599 (paid)", false, false, none).Count == 1,
                 $"file grew {growth:N0} bytes");
         }
+    }
+
+    /// <summary>The print path without a printer: lay pages onto paper and check they come out with ink on them.</summary>
+    private static void PrintTests(PdfDocument document, string outputDirectory, Action<string, bool, string> check)
+    {
+        var paper = new Size(816, 1056); // Letter at 96 dpi
+        var paginator = PrintService.CreatePaginator(document, [0, 1], paper);
+        check("print: lays out the pages asked for", paginator.PageCount == 2 && paginator.PageSize == paper, $"{paginator.PageCount} pages");
+
+        var bitmap = new RenderTargetBitmap(816, 1056, 96, 96, PixelFormats.Pbgra32);
+        var background = new DrawingVisual();
+        using (var dc = background.RenderOpen()) dc.DrawRectangle(Brushes.White, null, new Rect(0, 0, 816, 1056));
+        bitmap.Render(background);
+        bitmap.Render(paginator.GetPage(0).Visual);
+        var ink = CountInk(bitmap);
+        check("print: the sheet comes out with the page on it", ink > 200, $"{ink} dark pixels");
+        SavePng(bitmap, Path.Combine(outputDirectory, "print-sheet1.png"));
     }
 
     private static void ImagesToPdfTests(string input, string outputDirectory, Action<string, bool, string> check)

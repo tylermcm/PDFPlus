@@ -37,6 +37,18 @@ public partial class App : Application
             return;
         }
 
+        // The shell's print verbs: Outlook's Quick Print, Explorer's Print, and dropping a PDF on a printer.
+        // These print straight away and never show a window, which is the whole point of a quick print.
+        if (e.Args.Length >= 2 && e.Args[0] is "--print" or "/p" or "--printto" or "/pt")
+        {
+            base.OnStartup(e);
+            AppSettings.Load();
+            ThemeManager.Apply(AppSettings.Current.Theme);
+            var printer = e.Args[0] is "--printto" or "/pt" && e.Args.Length >= 3 ? e.Args[2] : null;
+            Dispatcher.BeginInvoke(async () => Shutdown(await QuickPrint.RunAsync(e.Args[1], printer)));
+            return;
+        }
+
         Timeline.Mark("app start");
         var files =e.Args.Where(a => !a.StartsWith('-') && File.Exists(a)).ToArray();
 
